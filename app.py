@@ -148,6 +148,8 @@ if IS_MAC:
         cg.CGDataProviderCopyData.argtypes = [ctypes.c_void_p]
         cf.CFDataGetBytePtr.restype = ctypes.c_void_p
         cf.CFDataGetBytePtr.argtypes = [ctypes.c_void_p]
+        cg.CGImageGetBytesPerRow.restype = ctypes.c_size_t
+        cg.CGImageGetBytesPerRow.argtypes = [ctypes.c_void_p]
         
         # Warp Mouse API
         cg.CGWarpMouseCursorPosition.restype = None
@@ -370,6 +372,92 @@ def set_mouse_pos(x, y):
         except Exception as e:
             print(f"Error warp mouse Windows: {e}")
 
+def find_character_yellow_dot(search_width=400, search_height=400):
+    """Scans the top-left area (minimap region) for the character's yellow dot pixel"""
+    if IS_MAC and cg_loaded:
+        try:
+            display_id = cg.CGMainDisplayID()
+            rect = CGRect(CGPoint(0, 0), CGSize(search_width, search_height))
+            image = cg.CGDisplayCreateImageForRect(display_id, rect)
+            if image:
+                provider = cg.CGImageGetDataProvider(image)
+                data = cg.CGDataProviderCopyData(provider)
+                if data:
+                    ptr = cf.CFDataGetBytePtr(data)
+                    bytes_per_row = cg.CGImageGetBytesPerRow(image)
+                    char_ptr = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_ubyte))
+                    
+                    # Search step by 2 pixels for speed
+                    for y in range(0, search_height, 2):
+                        for x in range(0, search_width, 2):
+                            offset = y * bytes_per_row + x * 4
+                            b = char_ptr[offset]
+                            g = char_ptr[offset+1]
+                            r = char_ptr[offset+2]
+                            
+                            # Yellow character dot threshold (R>=240, G>=200, B<=40)
+                            if r >= 240 and g >= 200 and b <= 40:
+                                cf.CFRelease(data)
+                                cf.CFRelease(image)
+                                return x, y
+                    cf.CFRelease(data)
+                cf.CFRelease(image)
+        except Exception as e:
+            print(f"Error scanning yellow dot macOS: {e}")
+            
+    elif IS_WINDOWS and user32 is not None:
+        try:
+            hdc_screen = user32.GetDC(0)
+            hdc_mem = ctypes.windll.gdi32.CreateCompatibleDC(hdc_screen)
+            h_bitmap = ctypes.windll.gdi32.CreateCompatibleBitmap(hdc_screen, search_width, search_height)
+            h_old = ctypes.windll.gdi32.SelectObject(hdc_mem, h_bitmap)
+            
+            # SRCCOPY BitBlt
+            ctypes.windll.gdi32.BitBlt(hdc_mem, 0, 0, search_width, search_height, hdc_screen, 0, 0, 0x00CC0020)
+            
+            class BITMAPINFOHEADER(ctypes.Structure):
+                _fields_ = [
+                    ("biSize", ctypes.c_ulong), ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
+                    ("biPlanes", ctypes.c_ushort), ("biBitCount", ctypes.c_ushort), ("biCompression", ctypes.c_ulong),
+                    ("biSizeImage", ctypes.c_ulong), ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long),
+                    ("biClrUsed", ctypes.c_ulong), ("biClrImportant", ctypes.c_ulong)
+                ]
+            class BITMAPINFO(ctypes.Structure):
+                _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", ctypes.c_ulong * 3)]
+                
+            bmi = BITMAPINFO()
+            bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bmi.bmiHeader.biWidth = search_width
+            bmi.bmiHeader.biHeight = -search_height # Top-down DIB
+            bmi.bmiHeader.biPlanes = 1
+            bmi.bmiHeader.biBitCount = 32
+            bmi.bmiHeader.biCompression = 0
+            
+            buffer_size = search_width * search_height * 4
+            buffer = (ctypes.c_ubyte * buffer_size)()
+            
+            ctypes.windll.gdi32.GetDIBits(hdc_screen, h_bitmap, 0, search_height, ctypes.byref(buffer), ctypes.byref(bmi), 0)
+            
+            # GDI cleanup
+            ctypes.windll.gdi32.SelectObject(hdc_mem, h_old)
+            ctypes.windll.gdi32.DeleteObject(h_bitmap)
+            ctypes.windll.gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(0, hdc_screen)
+            
+            for y in range(0, search_height, 2):
+                for x in range(0, search_width, 2):
+                    offset = (y * search_width + x) * 4
+                    b = buffer[offset]
+                    g = buffer[offset+1]
+                    r = buffer[offset+2]
+                    
+                    if r >= 240 and g >= 200 and b <= 40:
+                        return x, y
+        except Exception as e:
+            print(f"Error scanning yellow dot Windows: {e}")
+            
+    return None
+
 def get_mouse_pos_and_color():
     """Reads current mouse cursor position and color underneath it"""
     x, y = 0, 0
@@ -519,9 +607,15 @@ def pixel_trigger_thread_func():
         time.sleep(0.1)
 
 def jump_trigger_thread_func():
-    """Background thread executing the Move & Jump & Climb macro at specified intervals"""
+    """Background thread executing the Move & Jump & Climb macro with Minimap yellow dot navigation"""
     global state
     last_trigger_time = 0
+    
+    # Arrow key codes
+    left_kc = 123 if IS_MAC else 0x25
+    right_kc = 124 if IS_MAC else 0x27
+    up_kc = 126 if IS_MAC else 0x26
+    down_kc = 125 if IS_MAC else 0x28
     
     while True:
         with state_lock:
@@ -544,40 +638,93 @@ def jump_trigger_thread_func():
                 actual_cooldown += random.uniform(-jitter, jitter)
                 
             if current_time - last_trigger_time >= actual_cooldown:
-                print(f"[Jump Macro] Moving mouse to ({jump_x}, {jump_y}) and firing key {jump_action_name}...")
+                print(f"[Navigate Macro] Commencing movement towards target X: {jump_x} on minimap...")
                 
-                # Set Mouse Position
-                set_mouse_pos(jump_x, jump_y)
+                # 1. Navigation loop
+                start_nav_time = time.time()
+                nav_timeout = 12.0  # 12 seconds max to reach target
+                reached = False
+                last_dir = None
                 
-                # Humanizer idle delay (50ms ~ 150ms)
-                time.sleep(random.uniform(0.05, 0.15) if humanizer_enabled else 0.08)
-                
-                # Press Jump key (e.g. C)
-                send_keypress(jump_action_keycode)
-                
-                # Brief delay before climbing (80ms ~ 150ms)
-                time.sleep(random.uniform(0.08, 0.15) if humanizer_enabled else 0.1)
-                
-                # Climb Up (Hold ArrowUp for 2 seconds)
-                up_kc = 126 if IS_MAC else 0x26
-                hold_up_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
-                print(f"[Jump Macro] Holding ArrowUp for {hold_up_duration:.2f} seconds...")
-                send_key_down(up_kc)
-                time.sleep(hold_up_duration)
-                send_key_up(up_kc)
-                
-                # Brief stop between switching climb directions (100ms ~ 250ms)
-                time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
-                
-                # Climb Down (Hold ArrowDown for 2 seconds)
-                down_kc = 125 if IS_MAC else 0x28
-                hold_down_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
-                print(f"[Jump Macro] Holding ArrowDown for {hold_down_duration:.2f} seconds...")
-                send_key_down(down_kc)
-                time.sleep(hold_down_duration)
-                send_key_up(down_kc)
-                
-                last_trigger_time = current_time
+                while running and (time.time() - start_nav_time < nav_timeout):
+                    # Live check of running state
+                    with state_lock:
+                        running = state["running"]
+                        if not running:
+                            break
+                            
+                    pos = find_character_yellow_dot()
+                    if pos is None:
+                        # If character is not found, temporarily stop movement
+                        if last_dir:
+                            send_key_up(last_dir)
+                            last_dir = None
+                        time.sleep(0.1)
+                        continue
+                        
+                    curr_x, curr_y = pos
+                    
+                    # Target tolerance on minimap is ±2 pixels
+                    tolerance = 2
+                    if curr_x < jump_x - tolerance:
+                        # Move Right
+                        if last_dir == left_kc:
+                            send_key_up(left_kc)
+                        if last_dir != right_kc:
+                            send_key_down(right_kc)
+                            last_dir = right_kc
+                    elif curr_x > jump_x + tolerance:
+                        # Move Left
+                        if last_dir == right_kc:
+                            send_key_up(right_kc)
+                        if last_dir != left_kc:
+                            send_key_down(left_kc)
+                            last_dir = left_kc
+                    else:
+                        # Reached the exact coordinate!
+                        reached = True
+                        break
+                        
+                    time.sleep(0.05) # Scan minimap at 20Hz
+                    
+                # Stop walking
+                if last_dir:
+                    send_key_up(last_dir)
+                    
+                # Proceed with jump climb if reached or timed out but active
+                if reached or (running and not reached):
+                    if not reached:
+                        print("[Navigate Macro] Navigation timed out. Attempting grab/jump sequence anyway.")
+                    else:
+                        print("[Navigate Macro] Arrived at target X coordinate. Launching jump grab...")
+                        
+                    # Brief stop (100ms ~ 250ms)
+                    time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
+                    
+                    # Press Jump Key
+                    send_keypress(jump_action_keycode)
+                    
+                    # Brief delay before climbing (80ms ~ 150ms)
+                    time.sleep(random.uniform(0.08, 0.15) if humanizer_enabled else 0.1)
+                    
+                    # Climb Up (Hold ArrowUp for 2 seconds)
+                    hold_up_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
+                    print(f"[Navigate Macro] Holding ArrowUp for {hold_up_duration:.2f} seconds...")
+                    send_key_down(up_kc)
+                    time.sleep(hold_up_duration)
+                    send_key_up(up_kc)
+                    
+                    # Brief stop (100ms ~ 250ms)
+                    time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
+                    
+                    # Climb Down (Hold ArrowDown for 2 seconds)
+                    hold_down_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
+                    print(f"[Navigate Macro] Holding ArrowDown for {hold_down_duration:.2f} seconds...")
+                    send_key_down(down_kc)
+                    time.sleep(hold_down_duration)
+                    send_key_up(down_kc)
+                    
+                last_trigger_time = time.time()
                 
         time.sleep(0.1)
 
