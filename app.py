@@ -41,9 +41,9 @@ state = {
     "jump_x": 500,
     "jump_y": 500,
     "jump_cooldown_s": 20.0,
-    "jump_action_code_str": "Space",
-    "jump_action_keycode": 49,
-    "jump_action_name": "Space"
+    "jump_action_code_str": "KeyC",
+    "jump_action_keycode": 8 if IS_MAC else 0x43,
+    "jump_action_name": "C"
 }
 state_lock = threading.Lock()
 sleep_event = threading.Event()
@@ -273,6 +273,56 @@ def send_keypress(keycode):
     else:
         print(f"[Simulated Keystroke] Unsupported OS. Keycode: {keycode}")
 
+def send_key_down(keycode):
+    """Simulates a key down event globally"""
+    if IS_MAC:
+        if not cg_loaded: return
+        try:
+            event = cg.CGEventCreateKeyboardEvent(None, keycode, True)
+            if event:
+                cg.CGEventPost(0, event)
+                cf.CFRelease(event)
+        except Exception as e:
+            print(f"Error simulating macOS key down: {e}")
+    elif IS_WINDOWS:
+        if user32 is None: return
+        try:
+            scan_code = user32.MapVirtualKeyW(keycode, 0)
+            is_extended = keycode in [0x25, 0x26, 0x27, 0x28, 0x2E, 0x2D, 0x24, 0x23, 0x21, 0x22]
+            flags = 0x0008  # KEYEVENTF_SCANCODE
+            if is_extended: flags |= 0x0001
+            ki = KEYBDINPUT(wVk=0, wScan=scan_code, dwFlags=flags, time=0, dwExtraInfo=ctypes.c_void_p(0))
+            ii = INPUT_UNION(ki=ki)
+            inp = INPUT(type=1, ii=ii)
+            user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+        except Exception as e:
+            print(f"Error simulating Windows key down: {e}")
+
+def send_key_up(keycode):
+    """Simulates a key up event globally"""
+    if IS_MAC:
+        if not cg_loaded: return
+        try:
+            event = cg.CGEventCreateKeyboardEvent(None, keycode, False)
+            if event:
+                cg.CGEventPost(0, event)
+                cf.CFRelease(event)
+        except Exception as e:
+            print(f"Error simulating macOS key up: {e}")
+    elif IS_WINDOWS:
+        if user32 is None: return
+        try:
+            scan_code = user32.MapVirtualKeyW(keycode, 0)
+            is_extended = keycode in [0x25, 0x26, 0x27, 0x28, 0x2E, 0x2D, 0x24, 0x23, 0x21, 0x22]
+            flags = 0x0008 | 0x0002  # KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP
+            if is_extended: flags |= 0x0001
+            ki = KEYBDINPUT(wVk=0, wScan=scan_code, dwFlags=flags, time=0, dwExtraInfo=ctypes.c_void_p(0))
+            ii = INPUT_UNION(ki=ki)
+            inp = INPUT(type=1, ii=ii)
+            user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+        except Exception as e:
+            print(f"Error simulating Windows key up: {e}")
+
 def get_pixel_color(x, y):
     """Reads screen pixel RGB color at coordinate (x, y) dynamically without external dependencies"""
     r, g, b = 0, 0, 0
@@ -469,7 +519,7 @@ def pixel_trigger_thread_func():
         time.sleep(0.1)
 
 def jump_trigger_thread_func():
-    """Background thread executing the Move & Jump macro at specified intervals"""
+    """Background thread executing the Move & Jump & Climb macro at specified intervals"""
     global state
     last_trigger_time = 0
     
@@ -502,8 +552,30 @@ def jump_trigger_thread_func():
                 # Humanizer idle delay (50ms ~ 150ms)
                 time.sleep(random.uniform(0.05, 0.15) if humanizer_enabled else 0.08)
                 
-                # Fire Keypress
+                # Press Jump key (e.g. C)
                 send_keypress(jump_action_keycode)
+                
+                # Brief delay before climbing (80ms ~ 150ms)
+                time.sleep(random.uniform(0.08, 0.15) if humanizer_enabled else 0.1)
+                
+                # Climb Up (Hold ArrowUp for 2 seconds)
+                up_kc = 126 if IS_MAC else 0x26
+                hold_up_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
+                print(f"[Jump Macro] Holding ArrowUp for {hold_up_duration:.2f} seconds...")
+                send_key_down(up_kc)
+                time.sleep(hold_up_duration)
+                send_key_up(up_kc)
+                
+                # Brief stop between switching climb directions (100ms ~ 250ms)
+                time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
+                
+                # Climb Down (Hold ArrowDown for 2 seconds)
+                down_kc = 125 if IS_MAC else 0x28
+                hold_down_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
+                print(f"[Jump Macro] Holding ArrowDown for {hold_down_duration:.2f} seconds...")
+                send_key_down(down_kc)
+                time.sleep(hold_down_duration)
+                send_key_up(down_kc)
                 
                 last_trigger_time = current_time
                 
@@ -538,8 +610,8 @@ def load_config():
                     state["jump_x"] = data.get("jump_x", 500)
                     state["jump_y"] = data.get("jump_y", 500)
                     state["jump_cooldown_s"] = data.get("jump_cooldown_s", 20.0)
-                    state["jump_action_code_str"] = data.get("jump_action_code_str", "Space")
-                    state["jump_action_name"] = data.get("jump_action_name", "Space")
+                    state["jump_action_code_str"] = data.get("jump_action_code_str", "KeyC")
+                    state["jump_action_name"] = data.get("jump_action_name", "C")
                     
                     # Resolve keycodes
                     state["keycode"] = resolve_keycode(state["key_code_str"])
