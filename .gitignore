@@ -1,0 +1,11 @@
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local configuration
+config.json
+
+# macOS files
+.DS_Store
