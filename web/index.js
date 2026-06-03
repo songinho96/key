@@ -47,6 +47,7 @@ const macroToggle = document.getElementById("macroToggle");
 const macroBadge = document.getElementById("macroBadge");
 const humanizerToggle = document.getElementById("humanizerToggle");
 const humanizerBadge = document.getElementById("humanizerBadge");
+const accessibilityWarning = document.getElementById("accessibilityWarning");
 
 // Pixel Trigger UI Elements
 const pixelToggle = document.getElementById("pixelToggle");
@@ -89,6 +90,11 @@ const statStatus = document.getElementById("statStatus");
 const statKey = document.getElementById("statKey");
 const statInterval = document.getElementById("statInterval");
 
+// Scheduled Macro UI Elements
+const schedMacroList = document.getElementById("schedMacroList");
+const schedBadge = document.getElementById("schedBadge");
+const btnAddSchedMacro = document.getElementById("btnAddSchedMacro");
+
 // Preset Buttons
 const presetBtns = document.querySelectorAll(".preset-btn");
 
@@ -102,6 +108,7 @@ let appState = {
     count: 0,
     macro_enabled: false,
     humanizer_enabled: true,
+    macos_accessible: true,
     
     // Pixel Trigger config fields
     pixel_macro_enabled: false,
@@ -126,7 +133,8 @@ let appState = {
     minimap_offset_y: 0
 };
 let isRecording = false;
-let recordingTarget = "main"; // "main", "pixel", or "jump"
+let recordingTarget = "main"; // "main", "pixel", "jump", or "sched_{id}"
+let recordingSchedId = null;   // active scheduled macro id during recording
 let pollIntervalId = null;
 let isUpdatingConfig = false;
 
@@ -190,6 +198,9 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
     
+    // Scheduled Macro bindings
+    btnAddSchedMacro.addEventListener("click", addSchedMacro);
+    
     // Listen for global keypresses during recording
     window.addEventListener("keydown", handleGlobalKeyDown, true);
 });
@@ -225,6 +236,14 @@ function startPolling() {
                 
                 appState.count = newState.count;
                 appState.running = newState.running;
+                appState.macos_accessible = newState.macos_accessible;
+                
+                // Toggle accessibility warning banner visibility
+                if (appState.macos_accessible === false) {
+                    accessibilityWarning.style.display = "flex";
+                } else {
+                    accessibilityWarning.style.display = "none";
+                }
                 
                 // If we aren't recording or changing configurations, keep settings in sync
                 if (!isRecording && !isUpdatingConfig) {
@@ -254,11 +273,14 @@ function startPolling() {
                     appState.jump_action_name = newState.jump_action_name;
                     appState.minimap_offset_x = newState.minimap_offset_x;
                     appState.minimap_offset_y = newState.minimap_offset_y;
+                    appState.scheduled_macros = newState.scheduled_macros || [];
                     
                     updateMacroBadge();
                     updateHumanizerBadge();
                     updatePixelBadge();
                     updateJumpBadge();
+                    updateSchedBadge();
+                    renderSchedMacros();
                 }
                 
                 updateUIStateOnly();
@@ -307,6 +329,17 @@ function updateUI() {
     minimapOffsetX.value = appState.minimap_offset_x;
     minimapOffsetY.value = appState.minimap_offset_y;
     updateMinimapMarkerPosition();
+    
+    // Set warning banner visibility
+    if (appState.macos_accessible === false) {
+        accessibilityWarning.style.display = "flex";
+    } else {
+        accessibilityWarning.style.display = "none";
+    }
+    
+    // Render scheduled macros
+    updateSchedBadge();
+    renderSchedMacros();
     
     updateUIStateOnly();
 }
@@ -479,7 +512,18 @@ async function saveConfigToServer() {
                 jump_action_code_str: appState.jump_action_code_str,
                 jump_action_name: appState.jump_action_name,
                 minimap_offset_x: appState.minimap_offset_x,
-                minimap_offset_y: appState.minimap_offset_y
+                minimap_offset_y: appState.minimap_offset_y,
+                
+                // Scheduled macros
+                scheduled_macros: (appState.scheduled_macros || []).map(m => ({
+                    id: m.id,
+                    enabled: m.enabled,
+                    interval_s: m.interval_s,
+                    key_code_str: m.key_code_str,
+                    keycode: m.keycode,
+                    key_name: m.key_name,
+                    press_count: m.press_count
+                }))
             })
         });
         if (response.ok) {
@@ -528,6 +572,12 @@ async function handleGlobalKeyDown(event) {
         } else if (recordingTarget === "jump") {
             appState.jump_action_code_str = keyDetails.code_str;
             appState.jump_action_name = keyDetails.name;
+        } else if (recordingTarget.startsWith("sched_") && recordingSchedId) {
+            // Apply key to the matching scheduled macro
+            _applySchedKey(recordingSchedId, keyDetails);
+            recordingSchedId = null;
+            stopKeyRecording();
+            return; // Skip updateUI and saveConfigToServer below (already done in _applySchedKey)
         } else {
             appState.key_code_str = keyDetails.code_str;
             appState.key_name = keyDetails.name;
@@ -879,4 +929,157 @@ function startAbsoluteJumpPicking() {
                 });
         }
     }, 1000);
+}
+
+// ============================================
+// Scheduled Key Macro Functions
+// ============================================
+
+let _schedMacroIdCounter = Date.now();
+
+function genSchedId() {
+    _schedMacroIdCounter++;
+    return "sched_" + _schedMacroIdCounter;
+}
+
+function addSchedMacro() {
+    if (!appState.scheduled_macros) appState.scheduled_macros = [];
+    const newMacro = {
+        id: genSchedId(),
+        enabled: true,
+        interval_s: 30.0,
+        key_code_str: "KeyZ",
+        keycode: 6,  // macOS Z key
+        key_name: "Z",
+        press_count: 1
+    };
+    appState.scheduled_macros.push(newMacro);
+    updateSchedBadge();
+    renderSchedMacros();
+    saveConfigToServer();
+}
+
+function deleteSchedMacro(id) {
+    appState.scheduled_macros = (appState.scheduled_macros || []).filter(m => m.id !== id);
+    updateSchedBadge();
+    renderSchedMacros();
+    saveConfigToServer();
+}
+
+function updateSchedBadge() {
+    const macros = appState.scheduled_macros || [];
+    const activeCount = macros.filter(m => m.enabled).length;
+    if (activeCount > 0) {
+        schedBadge.textContent = `${activeCount}개 활성`;
+        schedBadge.className = "sched-badge active";
+    } else if (macros.length > 0) {
+        schedBadge.textContent = `${macros.length}개 등록`;
+        schedBadge.className = "sched-badge";
+    } else {
+        schedBadge.textContent = "비활성";
+        schedBadge.className = "sched-badge";
+    }
+}
+
+function renderSchedMacros() {
+    const macros = appState.scheduled_macros || [];
+    schedMacroList.innerHTML = "";
+    macros.forEach((macro, idx) => {
+        const card = document.createElement("div");
+        card.className = "sched-macro-card" + (macro.enabled ? " card-enabled" : "");
+        card.dataset.id = macro.id;
+        
+        card.innerHTML = `
+            <div class="sched-card-header">
+                <div class="sched-card-header-left">
+                    <label class="switch" title="매크로 활성화/비활성화">
+                        <input type="checkbox" class="sched-toggle" data-id="${macro.id}" ${macro.enabled ? "checked" : ""}>
+                        <span class="switch-slider green"></span>
+                    </label>
+                    <span class="sched-card-title">예약 매크로 ${idx + 1}</span>
+                </div>
+                <button type="button" class="sched-delete-btn" data-id="${macro.id}" title="삭제">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="sched-card-fields">
+                <div class="sched-field">
+                    <label>⏱ 주기 (초)</label>
+                    <input type="number" class="sched-interval" data-id="${macro.id}" min="0.5" step="0.5" value="${macro.interval_s}">
+                </div>
+                <div class="sched-field">
+                    <label>🎹 키</label>
+                    <div class="sched-key-cap" data-id="${macro.id}" title="클릭해서 키 설정">${macro.key_name || "?"}</div>
+                </div>
+                <div class="sched-field">
+                    <label>🔢 횟수</label>
+                    <input type="number" class="sched-count" data-id="${macro.id}" min="1" max="20" step="1" value="${macro.press_count}">
+                </div>
+            </div>
+        `;
+        schedMacroList.appendChild(card);
+        
+        // Bind toggle
+        card.querySelector(".sched-toggle").addEventListener("change", (e) => {
+            const m = appState.scheduled_macros.find(x => x.id === macro.id);
+            if (m) {
+                m.enabled = e.target.checked;
+                card.className = "sched-macro-card" + (m.enabled ? " card-enabled" : "");
+                updateSchedBadge();
+                saveConfigToServer();
+            }
+        });
+        
+        // Bind delete
+        card.querySelector(".sched-delete-btn").addEventListener("click", () => {
+            deleteSchedMacro(macro.id);
+        });
+        
+        // Bind interval input
+        card.querySelector(".sched-interval").addEventListener("change", (e) => {
+            const m = appState.scheduled_macros.find(x => x.id === macro.id);
+            if (m) {
+                let val = parseFloat(e.target.value);
+                if (isNaN(val) || val < 0.5) val = 0.5;
+                e.target.value = val;
+                m.interval_s = val;
+                saveConfigToServer();
+            }
+        });
+        
+        // Bind press count input
+        card.querySelector(".sched-count").addEventListener("change", (e) => {
+            const m = appState.scheduled_macros.find(x => x.id === macro.id);
+            if (m) {
+                let val = parseInt(e.target.value);
+                if (isNaN(val) || val < 1) val = 1;
+                if (val > 20) val = 20;
+                e.target.value = val;
+                m.press_count = val;
+                saveConfigToServer();
+            }
+        });
+        
+        // Bind key cap click -> start recording
+        card.querySelector(".sched-key-cap").addEventListener("click", () => {
+            recordingSchedId = macro.id;
+            startKeyRecording("sched_" + macro.id);
+        });
+    });
+}
+
+// Handle key recording completion for scheduled macros
+// This is integrated into the existing handleGlobalKeyDown at the top
+// We only need to update the specific scheduled macro's key fields
+
+function _applySchedKey(id, keyDetails) {
+    const m = (appState.scheduled_macros || []).find(x => x.id === id);
+    if (m) {
+        m.key_code_str = keyDetails.code_str;
+        m.key_name = keyDetails.name;
+        // Resolve keycode from MACOS_KEY_CODES
+        m.keycode = MACOS_KEY_CODES[keyDetails.code_str] !== undefined ? MACOS_KEY_CODES[keyDetails.code_str] : 49;
+        renderSchedMacros();
+        saveConfigToServer();
+    }
 }

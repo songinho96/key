@@ -25,6 +25,7 @@ state = {
     "count": 0,
     "macro_enabled": False,
     "humanizer_enabled": True,  # Anti-Detection (Humanizer) Mode
+    "macos_accessible": True,   # macOS Accessibility privilege status
     
     # Pixel Trigger Macro State
     "pixel_macro_enabled": False,
@@ -46,10 +47,16 @@ state = {
     "jump_action_keycode": 8 if IS_MAC else 0x43,
     "jump_action_name": "C",
     "minimap_offset_x": 0,
-    "minimap_offset_y": 0
+    "minimap_offset_y": 0,
+    
+    # Scheduled Key Macros (list of {id, enabled, interval_s, key_code_str, keycode, key_name, press_count})
+    "scheduled_macros": []
 }
 state_lock = threading.Lock()
 sleep_event = threading.Event()
+
+# Tracks last trigger time for each scheduled macro (keyed by macro id, outside state for performance)
+_sched_last_triggers = {}
 
 # macOS Virtual Keycode Mapping (standard key code to CGKeyCode)
 MAC_KEY_CODES = {
@@ -112,6 +119,17 @@ def resolve_keycode(key_code_str):
     elif IS_WINDOWS:
         return WIN_KEY_CODES.get(key_code_str, 0x20)  # Fallback to Windows Space (0x20)
     return 0
+
+def check_accessibility_privilege():
+    """Checks programmatically if the current process is trusted for macOS accessibility"""
+    if IS_MAC:
+        try:
+            ax = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+            return bool(ax.AXIsProcessTrusted())
+        except Exception:
+            return False
+    return True
+
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -809,12 +827,12 @@ def jump_trigger_thread_func():
                             
                     pos = find_character_yellow_dot()
                     if pos is None:
-                        # If character is not found, temporarily stop movement
+                        # If character is not found, abort immediately to prevent key freeze / conflict
+                        print("[Navigate Macro] Character yellow dot not found on minimap. Aborting navigation to prevent key conflicts.")
                         if last_dir:
                             send_key_up(last_dir)
                             last_dir = None
-                        time.sleep(0.1)
-                        continue
+                        break
                         
                     curr_x, curr_y = pos
                     diff_x = curr_x - jump_x # + means character is to the right of target -> must move left
@@ -866,13 +884,10 @@ def jump_trigger_thread_func():
                 if last_dir:
                     send_key_up(last_dir)
                     
-                # Proceed with jump climb if reached or timed out but active
-                if reached or (running and not reached):
-                    if not reached:
-                        print("[Navigate Macro] Navigation timed out. Attempting grab/jump sequence anyway.")
-                    else:
-                        print("[Navigate Macro] Arrived at target X coordinate. Launching jump grab...")
-                        
+                # Proceed with jump climb ONLY if we successfully reached the target X coordinate
+                if reached and running:
+                    print("[Navigate Macro] Arrived at target X coordinate. Launching jump grab...")
+                    
                     # Brief stop (100ms ~ 250ms)
                     time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
                     
@@ -898,9 +913,42 @@ def jump_trigger_thread_func():
                     send_key_down(down_kc)
                     time.sleep(hold_down_duration)
                     send_key_up(down_kc)
+                else:
+                    if not reached:
+                        print("[Navigate Macro] Skipping jump grab sequence because target coordinate was not reached or character was not found.")
                     
                 last_trigger_time = time.time()
                 
+        time.sleep(0.1)
+
+def scheduled_macro_thread_func():
+    """Background thread executing each user-defined scheduled key press macro independently"""
+    global state, _sched_last_triggers
+    
+    while True:
+        with state_lock:
+            running = state["running"]
+            macros = list(state.get("scheduled_macros", []))
+        
+        if running:
+            current_time = time.time()
+            for macro in macros:
+                if not macro.get("enabled", False):
+                    continue
+                macro_id = macro.get("id", "")
+                interval = max(0.5, float(macro.get("interval_s", 30.0)))
+                press_count = max(1, int(macro.get("press_count", 1)))
+                keycode = macro.get("keycode", 49)
+                
+                last_time = _sched_last_triggers.get(macro_id, 0)
+                if current_time - last_time >= interval:
+                    _sched_last_triggers[macro_id] = current_time
+                    print(f"[Scheduled Macro] Triggering '{macro.get('key_name','?')}' x{press_count} (id={macro_id})")
+                    for i in range(press_count):
+                        send_keypress(keycode)
+                        if i < press_count - 1:
+                            time.sleep(0.12)  # Small delay between multiple presses
+        
         time.sleep(0.1)
 
 def load_config():
@@ -936,6 +984,14 @@ def load_config():
                     state["jump_action_name"] = data.get("jump_action_name", "C")
                     state["minimap_offset_x"] = data.get("minimap_offset_x", 0)
                     state["minimap_offset_y"] = data.get("minimap_offset_y", 0)
+                    
+                    # Scheduled Macros Config
+                    raw_scheds = data.get("scheduled_macros", [])
+                    resolved_scheds = []
+                    for m in raw_scheds:
+                        m["keycode"] = resolve_keycode(m.get("key_code_str", "Space"))
+                        resolved_scheds.append(m)
+                    state["scheduled_macros"] = resolved_scheds
                     
                     # Resolve keycodes
                     state["keycode"] = resolve_keycode(state["key_code_str"])
@@ -973,7 +1029,13 @@ def save_config():
             "jump_action_code_str": state["jump_action_code_str"],
             "jump_action_name": state["jump_action_name"],
             "minimap_offset_x": state["minimap_offset_x"],
-            "minimap_offset_y": state["minimap_offset_y"]
+            "minimap_offset_y": state["minimap_offset_y"],
+            
+            # Scheduled Macros (stored without internal-only fields)
+            "scheduled_macros": [
+                {k: v for k, v in m.items() if not k.startswith("_")}
+                for m in state.get("scheduled_macros", [])
+            ]
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -1001,6 +1063,7 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             with state_lock:
+                state["macos_accessible"] = check_accessibility_privilege()
                 res = json.dumps(state)
             self.wfile.write(res.encode("utf-8"))
             
@@ -1145,6 +1208,13 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                         state["minimap_offset_x"] = int(data["minimap_offset_x"])
                     if "minimap_offset_y" in data:
                         state["minimap_offset_y"] = int(data["minimap_offset_y"])
+                    if "scheduled_macros" in data:
+                        # Resolve keycodes for each scheduled macro
+                        raw_list = data["scheduled_macros"]
+                        if isinstance(raw_list, list):
+                            for m in raw_list:
+                                m["keycode"] = resolve_keycode(m.get("key_code_str", "Space"))
+                            state["scheduled_macros"] = raw_list
                         
                 save_config()
                 sleep_event.set()  # Apply changes immediately
@@ -1189,6 +1259,9 @@ if __name__ == "__main__":
     
     # Initialize background move & jump macro loop
     threading.Thread(target=jump_trigger_thread_func, daemon=True).start()
+    
+    # Initialize background scheduled key macro loop
+    threading.Thread(target=scheduled_macro_thread_func, daemon=True).start()
     
     # Open dashboard in browser
     threading.Thread(target=open_dashboard, daemon=True).start()

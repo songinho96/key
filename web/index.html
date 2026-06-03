@@ -25,8 +25,16 @@
                 <h1>AutoKey</h1>
                 <span class="version-badge">macOS</span>
             </div>
-            <p class="subtitle">맥OS용 백그라운드 키보드 입력 자동화 프로그램</p>
         </header>
+
+        <!-- Accessibility Warning Banner -->
+        <div class="accessibility-warning-banner" id="accessibilityWarning" style="display: none;">
+            <span class="warning-icon">⚠️</span>
+            <div class="warning-text-content">
+                <strong>macOS 손쉬운 사용(Accessibility) 권한이 필요합니다!</strong>
+                <span>최근 프로그램이 업데이트/재빌드되어 권한이 풀렸을 수 있습니다. <strong>[시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용]</strong>에서 <strong>AutoKey</strong>(또는 실행 중인 터미널/개발 도구)의 스위치를 껐다가 다시 켜주세요.</span>
+            </div>
+        </div>
 
         <main class="dashboard-grid">
             <!-- Left Panel: Configuration -->
@@ -269,6 +277,23 @@
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Scheduled Key Macro Box -->
+                <div class="setting-group sched-group">
+                    <div class="setting-label-row">
+                        <label>⏱ 시간 예약 키 매크로</label>
+                        <span class="sched-badge" id="schedBadge">비활성</span>
+                    </div>
+                    <p class="help-text" style="margin-bottom: 10px;">일정 주기마다 자동으로 키를 누릅니다. (펫 물약 등)</p>
+                    
+                    <!-- Dynamic list of scheduled macros -->
+                    <div id="schedMacroList" style="display: flex; flex-direction: column; gap: 10px;"></div>
+                    
+                    <button type="button" class="btn btn-secondary" id="btnAddSchedMacro" style="margin-top: 10px; width: 100%; height: 36px; font-weight: 600;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        예약 매크로 추가
+                    </button>
                 </div>
             </section>
 
