@@ -77,6 +77,8 @@ const minimapPlaceholder = document.getElementById("minimapPlaceholder");
 const minimapMarker = document.getElementById("minimapMarker");
 const minimapOffsetX = document.getElementById("minimapOffsetX");
 const minimapOffsetY = document.getElementById("minimapOffsetY");
+const btnPickMinimapOffset = document.getElementById("btnPickMinimapOffset");
+const btnPickJumpPosAbsolute = document.getElementById("btnPickJumpPosAbsolute");
 const jumpKeyCapDisplay = document.getElementById("jumpKeyCapDisplay");
 const btnRecordJumpKey = document.getElementById("btnRecordJumpKey");
 const jumpCooldownInput = document.getElementById("jumpCooldownInput");
@@ -173,6 +175,8 @@ document.addEventListener("DOMContentLoaded", () => {
     jumpCooldownInput.addEventListener("change", handleJumpCooldownChange);
     minimapOffsetX.addEventListener("change", handleMinimapOffsetChange);
     minimapOffsetY.addEventListener("change", handleMinimapOffsetChange);
+    btnPickMinimapOffset.addEventListener("click", startMinimapOffsetPicking);
+    btnPickJumpPosAbsolute.addEventListener("click", startAbsoluteJumpPicking);
     
     // Presets
     presetBtns.forEach(btn => {
@@ -794,4 +798,85 @@ function handleMinimapOffsetChange(e) {
         appState.minimap_offset_y = val;
     }
     saveConfigToServer();
+}
+
+function startMinimapOffsetPicking() {
+    pickerOverlay.classList.add("active");
+    let timeLeft = 3;
+    pickerCountdown.textContent = timeLeft;
+    
+    const interval = setInterval(() => {
+        timeLeft--;
+        if (timeLeft > 0) {
+            pickerCountdown.textContent = timeLeft;
+        } else {
+            clearInterval(interval);
+            // Trigger pick API
+            fetch("/api/pick")
+                .then(res => {
+                    if (!res.ok) throw new Error("Pick request failed");
+                    return res.json();
+                })
+                .then(data => {
+                    minimapOffsetX.value = data.x;
+                    minimapOffsetY.value = data.y;
+                    
+                    appState.minimap_offset_x = data.x;
+                    appState.minimap_offset_y = data.y;
+                    
+                    saveConfigToServer();
+                })
+                .catch(err => {
+                    console.error("Error picking minimap offset:", err);
+                })
+                .finally(() => {
+                    pickerOverlay.classList.remove("active");
+                });
+        }
+    }, 1000);
+}
+
+function startAbsoluteJumpPicking() {
+    pickerOverlay.classList.add("active");
+    let timeLeft = 3;
+    pickerCountdown.textContent = timeLeft;
+    
+    const interval = setInterval(() => {
+        timeLeft--;
+        if (timeLeft > 0) {
+            pickerCountdown.textContent = timeLeft;
+        } else {
+            clearInterval(interval);
+            // Trigger pick API
+            fetch("/api/pick")
+                .then(res => {
+                    if (!res.ok) throw new Error("Pick request failed");
+                    return res.json();
+                })
+                .then(data => {
+                    // Convert screen absolute coordinate to minimap relative coordinate
+                    const relativeX = data.x - appState.minimap_offset_x;
+                    const relativeY = data.y - appState.minimap_offset_y;
+                    
+                    // Clamp inside 0~400 range
+                    const clampedX = Math.max(0, Math.min(400, relativeX));
+                    const clampedY = Math.max(0, Math.min(400, relativeY));
+                    
+                    jumpXInput.value = clampedX;
+                    jumpYInput.value = clampedY;
+                    
+                    appState.jump_x = clampedX;
+                    appState.jump_y = clampedY;
+                    
+                    updateMinimapMarkerPosition();
+                    saveConfigToServer();
+                })
+                .catch(err => {
+                    console.error("Error picking absolute jump position:", err);
+                })
+                .finally(() => {
+                    pickerOverlay.classList.remove("active");
+                });
+        }
+    }, 1000);
 }
