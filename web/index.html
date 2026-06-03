@@ -103,6 +103,75 @@
                         <span class="macro-toggle-label-text">패턴 랜덤화 (주기/키 유지시간/이동 거리)</span>
                     </div>
                 </div>
+
+                <!-- Pixel Trigger Macro Box -->
+                <div class="setting-group pixel-group">
+                    <div class="setting-label-row">
+                        <label for="pixelToggle">픽셀 트리거 매크로</label>
+                        <span class="pixel-badge" id="pixelBadge">비활성</span>
+                    </div>
+                    <div class="macro-toggle-row">
+                        <label class="switch">
+                            <input type="checkbox" id="pixelToggle">
+                            <span class="switch-slider green"></span>
+                        </label>
+                        <span class="macro-toggle-label-text">특정 픽셀 색상 감지 시 키 입력</span>
+                    </div>
+                    
+                    <div class="pixel-config-container" id="pixelConfigContainer" style="display: none;">
+                        <div class="pixel-row">
+                            <div class="pixel-field">
+                                <label for="pixelXInput">X 좌표</label>
+                                <input type="number" id="pixelXInput" value="100">
+                            </div>
+                            <div class="pixel-field">
+                                <label for="pixelYInput">Y 좌표</label>
+                                <input type="number" id="pixelYInput" value="100">
+                            </div>
+                            <button type="button" class="btn btn-secondary picker-btn" id="btnPickPixel">
+                                🎯 좌표 가져오기
+                            </button>
+                        </div>
+                        
+                        <div class="pixel-row">
+                            <div class="pixel-field">
+                                <label for="pixelColorInput">목표 색상</label>
+                                <div class="color-picker-wrapper">
+                                    <input type="text" id="pixelColorInput" value="#FFCC00" placeholder="#HEX">
+                                    <span class="color-preview" id="pixelColorPreview" style="background-color: #FFCC00;"></span>
+                                </div>
+                            </div>
+                            <div class="pixel-field">
+                                <label for="pixelMatchType">매칭 조건</label>
+                                <select id="pixelMatchType" class="select-input">
+                                    <option value="equal">색상이 같을 때</option>
+                                    <option value="not_equal">색상이 다를 때</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="pixel-row">
+                            <div class="pixel-field-full">
+                                <label>실행할 키 설정</label>
+                                <div class="key-binder-card-small" id="pixelKeyBinderCard">
+                                    <div class="key-display-small">
+                                        <span class="key-cap-small" id="pixelKeyCapDisplay">Space</span>
+                                    </div>
+                                    <button type="button" class="btn btn-secondary btn-xs" id="btnRecordPixelKey">
+                                        키 설정
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="pixel-field">
+                                <label for="pixelCooldownInput">쿨다운(초)</label>
+                                <div class="input-container-small">
+                                    <input type="number" id="pixelCooldownInput" min="0.1" step="0.1" value="1.5">
+                                    <span class="input-unit-small">초</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- Right Panel: Run & Stats -->
@@ -172,6 +241,19 @@
                 </div>
             </div>
         </footer>
+    </div>
+
+    <!-- Pixel Picker Countdown Overlay -->
+    <div class="overlay" id="pickerOverlay">
+        <div class="overlay-card glass-panel">
+            <div class="record-pulse target-pulse" style="font-size: 2rem; display: flex; align-items: center; justify-content: center;">
+                🎯
+            </div>
+            <h2>마우스 위치 조준 중...</h2>
+            <p>3초 후 마우스가 가리키는 곳의 좌표와 색상을 가져옵니다.</p>
+            <div class="countdown-display" id="pickerCountdown" style="font-size: 4rem; font-weight: 700; color: var(--color-cyan); margin: 15px 0; font-family: var(--font-mono);">3</div>
+            <p class="help-text">마우스를 원하는 화면 픽셀 위치로 올려두고 대기하세요.</p>
+        </div>
     </div>
 
     <!-- Recording Key Overlay -->

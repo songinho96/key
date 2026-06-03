@@ -23,7 +23,18 @@ state = {
     "interval_ms": 1000,
     "count": 0,
     "macro_enabled": False,
-    "humanizer_enabled": True  # Anti-Detection (Humanizer) Mode
+    "humanizer_enabled": True,  # Anti-Detection (Humanizer) Mode
+    
+    # Pixel Trigger Macro State
+    "pixel_macro_enabled": False,
+    "pixel_x": 100,
+    "pixel_y": 100,
+    "pixel_color": "#FFCC00",
+    "pixel_match_type": "equal", # "equal" or "not_equal"
+    "pixel_action_code_str": "Space",
+    "pixel_action_keycode": 49,
+    "pixel_action_name": "Space",
+    "pixel_cooldown_s": 1.5
 }
 state_lock = threading.Lock()
 sleep_event = threading.Event()
@@ -74,6 +85,14 @@ WIN_KEY_CODES = {
     "Slash": 0xBF, "Backquote": 0xC0
 }
 
+# Structs for macOS CoreGraphics coordinate mapping
+class CGPoint(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+class CGSize(ctypes.Structure):
+    _fields_ = [("width", ctypes.c_double), ("height", ctypes.c_double)]
+class CGRect(ctypes.Structure):
+    _fields_ = [("origin", CGPoint), ("size", CGSize)]
+
 def resolve_keycode(key_code_str):
     """Maps the standardized JavaScript key code to the local OS virtual keycode"""
     if IS_MAC:
@@ -98,12 +117,28 @@ if IS_MAC:
         cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
         cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
         
+        cg.CGEventCreate.restype = ctypes.c_void_p
+        cg.CGEventCreate.argtypes = [ctypes.c_void_p]
+        cg.CGEventGetLocation.restype = CGPoint
+        cg.CGEventGetLocation.argtypes = [ctypes.c_void_p]
+        
         cg.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
         cg.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_ushort, ctypes.c_bool]
         cg.CGEventPost.restype = None
         cg.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
         cf.CFRelease.restype = None
         cf.CFRelease.argtypes = [ctypes.c_void_p]
+        
+        # Display/Pixel reading APIs
+        cg.CGDisplayCreateImageForRect.restype = ctypes.c_void_p
+        cg.CGDisplayCreateImageForRect.argtypes = [ctypes.c_uint32, CGRect]
+        cg.CGMainDisplayID.restype = ctypes.c_uint32
+        cg.CGImageGetDataProvider.restype = ctypes.c_void_p
+        cg.CGImageGetDataProvider.argtypes = [ctypes.c_void_p]
+        cg.CGDataProviderCopyData.restype = ctypes.c_void_p
+        cg.CGDataProviderCopyData.argtypes = [ctypes.c_void_p]
+        cf.CFDataGetBytePtr.restype = ctypes.c_void_p
+        cf.CFDataGetBytePtr.argtypes = [ctypes.c_void_p]
         
         cg_loaded = True
     except Exception as e:
@@ -116,6 +151,9 @@ if IS_WINDOWS:
         user32 = ctypes.windll.user32
         
         # Windows Ctypes Structures
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+            
         class KEYBDINPUT(ctypes.Structure):
             _fields_ = [
                 ("wVk", ctypes.c_ushort),
@@ -222,12 +260,69 @@ def send_keypress(keycode):
     else:
         print(f"[Simulated Keystroke] Unsupported OS. Keycode: {keycode}")
 
+def get_pixel_color(x, y):
+    """Reads screen pixel RGB color at coordinate (x, y) dynamically without external dependencies"""
+    r, g, b = 0, 0, 0
+    if IS_MAC and cg_loaded:
+        try:
+            display_id = cg.CGMainDisplayID()
+            rect = CGRect(CGPoint(x, y), CGSize(1, 1))
+            image = cg.CGDisplayCreateImageForRect(display_id, rect)
+            if image:
+                provider = cg.CGImageGetDataProvider(image)
+                data = cg.CGDataProviderCopyData(provider)
+                if data:
+                    ptr = cf.CFDataGetBytePtr(data)
+                    char_ptr = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_ubyte))
+                    # BGRA format is standard on macOS CoreGraphics
+                    b = char_ptr[0]
+                    g = char_ptr[1]
+                    r = char_ptr[2]
+                    cf.CFRelease(data)
+                cf.CFRelease(image)
+        except Exception as e:
+            pass
+    elif IS_WINDOWS and user32 is not None:
+        try:
+            hdc = user32.GetDC(0)
+            color = ctypes.windll.gdi32.GetPixel(hdc, x, y)
+            r = color & 0xff
+            g = (color >> 8) & 0xff
+            b = (color >> 16) & 0xff
+            user32.ReleaseDC(0, hdc)
+        except Exception as e:
+            pass
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+def get_mouse_pos_and_color():
+    """Reads current mouse cursor position and color underneath it"""
+    x, y = 0, 0
+    color_hex = "#000000"
+    if IS_MAC and cg_loaded:
+        try:
+            evt = cg.CGEventCreate(None)
+            pos = cg.CGEventGetLocation(evt)
+            x, y = int(pos.x), int(pos.y)
+            cf.CFRelease(evt)
+            color_hex = get_pixel_color(x, y)
+        except Exception as e:
+            print(f"Error getting mouse pos/color macOS: {e}")
+    elif IS_WINDOWS and user32 is not None:
+        try:
+            pt = POINT()
+            user32.GetCursorPos(ctypes.byref(pt))
+            x, y = pt.x, pt.y
+            color_hex = get_pixel_color(x, y)
+        except Exception as e:
+            print(f"Error getting mouse pos/color Windows: {e}")
+    return x, y, color_hex
+
 def presser_thread_func():
     """Background worker thread executing keypress loop at specified intervals"""
     global state
     
     last_macro_time = time.time()
-    next_macro_delay = 60.0  # Dynamic macro delay target (will be randomized if humanizer is active)
+    next_macro_delay = 60.0  # Dynamic macro delay target (randomized if humanizer is active)
     
     while True:
         with state_lock:
@@ -310,6 +405,43 @@ def presser_thread_func():
             next_macro_delay = random.uniform(50.0, 70.0) if humanizer_enabled else 60.0
             time.sleep(0.1)
 
+def pixel_trigger_thread_func():
+    """Background thread polling target pixel color 10 times a second and firing actions on color match"""
+    global state
+    last_trigger_time = 0
+    
+    while True:
+        with state_lock:
+            running = state["running"]
+            pixel_macro_enabled = state["pixel_macro_enabled"]
+            pixel_x = state["pixel_x"]
+            pixel_y = state["pixel_y"]
+            pixel_color = state["pixel_color"]
+            pixel_match_type = state["pixel_match_type"]
+            pixel_action_keycode = state["pixel_action_keycode"]
+            pixel_action_name = state["pixel_action_name"]
+            pixel_cooldown_s = state["pixel_cooldown_s"]
+            
+        if running and pixel_macro_enabled:
+            current_time = time.time()
+            if current_time - last_trigger_time >= pixel_cooldown_s:
+                current_color = get_pixel_color(pixel_x, pixel_y)
+                
+                # Check for color equivalence match
+                match = False
+                if pixel_match_type == "equal" and current_color.upper() == pixel_color.upper():
+                    match = True
+                elif pixel_match_type == "not_equal" and current_color.upper() != pixel_color.upper():
+                    match = True
+                    
+                if match:
+                    print(f"[Pixel Trigger] Detected matching color {current_color} at ({pixel_x}, {pixel_y}). Firing {pixel_action_name}...")
+                    send_keypress(pixel_action_keycode)
+                    last_trigger_time = current_time
+                    
+        # Sleep for 100ms
+        time.sleep(0.1)
+
 def load_config():
     """Load configuration settings from config.json if it exists"""
     global state
@@ -323,9 +455,21 @@ def load_config():
                     state["interval_ms"] = data.get("interval_ms", 1000)
                     state["macro_enabled"] = data.get("macro_enabled", False)
                     state["humanizer_enabled"] = data.get("humanizer_enabled", True)
-                    # Resolve keycode on load
+                    
+                    # Pixel Trigger Config
+                    state["pixel_macro_enabled"] = data.get("pixel_macro_enabled", False)
+                    state["pixel_x"] = data.get("pixel_x", 100)
+                    state["pixel_y"] = data.get("pixel_y", 100)
+                    state["pixel_color"] = data.get("pixel_color", "#FFCC00")
+                    state["pixel_match_type"] = data.get("pixel_match_type", "equal")
+                    state["pixel_action_code_str"] = data.get("pixel_action_code_str", "Space")
+                    state["pixel_action_name"] = data.get("pixel_action_name", "Space")
+                    state["pixel_cooldown_s"] = data.get("pixel_cooldown_s", 1.5)
+                    
+                    # Resolve keycodes
                     state["keycode"] = resolve_keycode(state["key_code_str"])
-            print(f"[Config] Loaded: Key={state['key_name']} (OS Code {state['keycode']}), Interval={state['interval_ms']}ms, Macro={state['macro_enabled']}, Humanizer={state['humanizer_enabled']}")
+                    state["pixel_action_keycode"] = resolve_keycode(state["pixel_action_code_str"])
+            print(f"[Config] Loaded successfully.")
         except Exception as e:
             print(f"[Config] Error loading configuration: {e}")
 
@@ -337,7 +481,17 @@ def save_config():
             "key_name": state["key_name"],
             "interval_ms": state["interval_ms"],
             "macro_enabled": state["macro_enabled"],
-            "humanizer_enabled": state["humanizer_enabled"]
+            "humanizer_enabled": state["humanizer_enabled"],
+            
+            # Pixel Trigger Config
+            "pixel_macro_enabled": state["pixel_macro_enabled"],
+            "pixel_x": state["pixel_x"],
+            "pixel_y": state["pixel_y"],
+            "pixel_color": state["pixel_color"],
+            "pixel_match_type": state["pixel_match_type"],
+            "pixel_action_code_str": state["pixel_action_code_str"],
+            "pixel_action_name": state["pixel_action_name"],
+            "pixel_cooldown_s": state["pixel_cooldown_s"]
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -367,6 +521,17 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
             with state_lock:
                 res = json.dumps(state)
             self.wfile.write(res.encode("utf-8"))
+            
+        elif self.path == "/api/pick":
+            # Read current mouse position and pixel color under it
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            x, y, color = get_mouse_pos_and_color()
+            res = json.dumps({"x": x, "y": y, "color": color})
+            self.wfile.write(res.encode("utf-8"))
+            
         else:
             # Server static files
             clean_path = self.path.split("?")[0].lstrip("/")
@@ -444,9 +609,29 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                         state["macro_enabled"] = bool(data["macro_enabled"])
                     if "humanizer_enabled" in data:
                         state["humanizer_enabled"] = bool(data["humanizer_enabled"])
+                        
+                    # Parse Pixel trigger configurations
+                    if "pixel_macro_enabled" in data:
+                        state["pixel_macro_enabled"] = bool(data["pixel_macro_enabled"])
+                    if "pixel_x" in data:
+                        state["pixel_x"] = int(data["pixel_x"])
+                    if "pixel_y" in data:
+                        state["pixel_y"] = int(data["pixel_y"])
+                    if "pixel_color" in data:
+                        state["pixel_color"] = str(data["pixel_color"])
+                    if "pixel_match_type" in data:
+                        state["pixel_match_type"] = str(data["pixel_match_type"])
+                    if "pixel_action_code_str" in data:
+                        state["pixel_action_code_str"] = str(data["pixel_action_code_str"])
+                        state["pixel_action_keycode"] = resolve_keycode(state["pixel_action_code_str"])
+                    if "pixel_action_name" in data:
+                        state["pixel_action_name"] = str(data["pixel_action_name"])
+                    if "pixel_cooldown_s" in data:
+                        state["pixel_cooldown_s"] = max(0.1, float(data["pixel_cooldown_s"]))
+                        
                 save_config()
                 sleep_event.set()  # Apply changes immediately
-                print(f"[Control] Config updated: Key={state['key_name']} (OS Code {state['keycode']}), Interval={state['interval_ms']}ms, Macro={state['macro_enabled']}, Humanizer={state['humanizer_enabled']}")
+                print(f"[Control] Config updated.")
             except Exception as e:
                 response_data = {"success": False, "error": str(e)}
         else:
@@ -472,7 +657,7 @@ def open_dashboard():
     webbrowser.open("http://localhost:5001")
 
 if __name__ == "__main__":
-    # Ensure current working directory is the script's folder so 'web/' paths resolve correctly
+    # Ensure current working directory is correct
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     
@@ -481,6 +666,9 @@ if __name__ == "__main__":
     
     # Initialize background keypress loop
     threading.Thread(target=presser_thread_func, daemon=True).start()
+    
+    # Initialize background pixel checking loop
+    threading.Thread(target=pixel_trigger_thread_func, daemon=True).start()
     
     # Open dashboard in browser
     threading.Thread(target=open_dashboard, daemon=True).start()

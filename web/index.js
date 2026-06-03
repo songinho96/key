@@ -48,6 +48,22 @@ const macroBadge = document.getElementById("macroBadge");
 const humanizerToggle = document.getElementById("humanizerToggle");
 const humanizerBadge = document.getElementById("humanizerBadge");
 
+// Pixel Trigger UI Elements
+const pixelToggle = document.getElementById("pixelToggle");
+const pixelBadge = document.getElementById("pixelBadge");
+const pixelConfigContainer = document.getElementById("pixelConfigContainer");
+const pixelXInput = document.getElementById("pixelXInput");
+const pixelYInput = document.getElementById("pixelYInput");
+const btnPickPixel = document.getElementById("btnPickPixel");
+const pixelColorInput = document.getElementById("pixelColorInput");
+const pixelColorPreview = document.getElementById("pixelColorPreview");
+const pixelMatchType = document.getElementById("pixelMatchType");
+const pixelKeyCapDisplay = document.getElementById("pixelKeyCapDisplay");
+const btnRecordPixelKey = document.getElementById("btnRecordPixelKey");
+const pixelCooldownInput = document.getElementById("pixelCooldownInput");
+const pickerOverlay = document.getElementById("pickerOverlay");
+const pickerCountdown = document.getElementById("pickerCountdown");
+
 // Stat Elements
 const statCount = document.getElementById("statCount");
 const statStatus = document.getElementById("statStatus");
@@ -66,9 +82,21 @@ let appState = {
     interval_ms: 1000,
     count: 0,
     macro_enabled: false,
-    humanizer_enabled: true
+    humanizer_enabled: true,
+    
+    // Pixel Trigger config fields
+    pixel_macro_enabled: false,
+    pixel_x: 100,
+    pixel_y: 100,
+    pixel_color: "#FFCC00",
+    pixel_match_type: "equal",
+    pixel_action_code_str: "Space",
+    pixel_action_keycode: 49,
+    pixel_action_name: "Space",
+    pixel_cooldown_s: 1.5
 };
 let isRecording = false;
+let recordingTarget = "main"; // "main" or "pixel"
 let pollIntervalId = null;
 let isUpdatingConfig = false;
 
@@ -81,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     
     // Register event listeners
-    btnRecordKey.addEventListener("click", startKeyRecording);
+    btnRecordKey.addEventListener("click", () => startKeyRecording("main"));
     btnCancelRecord.addEventListener("click", stopKeyRecording);
     btnToggleRun.addEventListener("click", toggleExecution);
     
@@ -95,6 +123,17 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Humanizer toggle binding
     humanizerToggle.addEventListener("change", handleHumanizerToggleChange);
+
+    // Pixel Trigger bindings
+    pixelToggle.addEventListener("change", handlePixelToggleChange);
+    pixelXInput.addEventListener("change", handlePixelCoordsChange);
+    pixelYInput.addEventListener("change", handlePixelCoordsChange);
+    btnPickPixel.addEventListener("click", startPixelPicking);
+    pixelColorInput.addEventListener("input", handlePixelColorChange);
+    pixelColorInput.addEventListener("change", handlePixelColorChange);
+    pixelMatchType.addEventListener("change", handlePixelMatchTypeChange);
+    btnRecordPixelKey.addEventListener("click", () => startKeyRecording("pixel"));
+    pixelCooldownInput.addEventListener("change", handlePixelCooldownChange);
     
     // Presets
     presetBtns.forEach(btn => {
@@ -152,8 +191,20 @@ function startPolling() {
                     appState.interval_ms = newState.interval_ms;
                     appState.macro_enabled = newState.macro_enabled;
                     appState.humanizer_enabled = newState.humanizer_enabled;
+                    
+                    appState.pixel_macro_enabled = newState.pixel_macro_enabled;
+                    appState.pixel_x = newState.pixel_x;
+                    appState.pixel_y = newState.pixel_y;
+                    appState.pixel_color = newState.pixel_color;
+                    appState.pixel_match_type = newState.pixel_match_type;
+                    appState.pixel_action_code_str = newState.pixel_action_code_str;
+                    appState.pixel_action_keycode = newState.pixel_action_keycode;
+                    appState.pixel_action_name = newState.pixel_action_name;
+                    appState.pixel_cooldown_s = newState.pixel_cooldown_s;
+                    
                     updateMacroBadge();
                     updateHumanizerBadge();
+                    updatePixelBadge();
                 }
                 
                 updateUIStateOnly();
@@ -180,6 +231,17 @@ function updateUI() {
     // Update macro toggle state
     updateMacroBadge();
     updateHumanizerBadge();
+    
+    // Update pixel macro inputs & elements
+    pixelToggle.checked = appState.pixel_macro_enabled;
+    updatePixelBadge();
+    pixelXInput.value = appState.pixel_x;
+    pixelYInput.value = appState.pixel_y;
+    pixelColorInput.value = appState.pixel_color;
+    pixelColorPreview.style.backgroundColor = appState.pixel_color;
+    pixelMatchType.value = appState.pixel_match_type;
+    pixelKeyCapDisplay.textContent = appState.pixel_action_name;
+    pixelCooldownInput.value = appState.pixel_cooldown_s;
     
     updateUIStateOnly();
 }
@@ -217,6 +279,18 @@ function updateMacroBadge() {
         macroBadge.textContent = "비활성";
         macroBadge.className = "macro-badge";
         macroToggle.checked = false;
+    }
+}
+
+function updatePixelBadge() {
+    if (appState.pixel_macro_enabled) {
+        pixelBadge.textContent = "활성";
+        pixelBadge.className = "pixel-badge active";
+        pixelConfigContainer.style.display = "flex";
+    } else {
+        pixelBadge.textContent = "비활성";
+        pixelBadge.className = "pixel-badge";
+        pixelConfigContainer.style.display = "none";
     }
 }
 
@@ -320,7 +394,17 @@ async function saveConfigToServer() {
                 key_name: appState.key_name,
                 interval_ms: appState.interval_ms,
                 macro_enabled: appState.macro_enabled,
-                humanizer_enabled: appState.humanizer_enabled
+                humanizer_enabled: appState.humanizer_enabled,
+                
+                // Pixel fields
+                pixel_macro_enabled: appState.pixel_macro_enabled,
+                pixel_x: appState.pixel_x,
+                pixel_y: appState.pixel_y,
+                pixel_color: appState.pixel_color,
+                pixel_match_type: appState.pixel_match_type,
+                pixel_action_code_str: appState.pixel_action_code_str,
+                pixel_action_name: appState.pixel_action_name,
+                pixel_cooldown_s: appState.pixel_cooldown_s
             })
         });
         if (response.ok) {
@@ -334,7 +418,8 @@ async function saveConfigToServer() {
 }
 
 // Start recording keyboard input
-function startKeyRecording() {
+function startKeyRecording(target = "main") {
+    recordingTarget = target;
     isRecording = true;
     recordingOverlay.classList.add("active");
 }
@@ -362,8 +447,13 @@ async function handleGlobalKeyDown(event) {
     
     const keyDetails = mapJsEventToOsKey(event);
     if (keyDetails) {
-        appState.key_code_str = keyDetails.code_str;
-        appState.key_name = keyDetails.name;
+        if (recordingTarget === "pixel") {
+            appState.pixel_action_code_str = keyDetails.code_str;
+            appState.pixel_action_name = keyDetails.name;
+        } else {
+            appState.key_code_str = keyDetails.code_str;
+            appState.key_name = keyDetails.name;
+        }
         
         // Update display immediately
         updateUI();
@@ -433,4 +523,85 @@ async function toggleExecution() {
     } catch (e) {
         console.error("API request failed:", e);
     }
+}
+
+// Pixel Trigger Event Handlers
+function handlePixelToggleChange(e) {
+    appState.pixel_macro_enabled = e.target.checked;
+    updatePixelBadge();
+    saveConfigToServer();
+}
+
+function handlePixelCoordsChange() {
+    let x = parseInt(pixelXInput.value, 10);
+    let y = parseInt(pixelYInput.value, 10);
+    if (isNaN(x) || x < 0) x = 0;
+    if (isNaN(y) || y < 0) y = 0;
+    pixelXInput.value = x;
+    pixelYInput.value = y;
+    appState.pixel_x = x;
+    appState.pixel_y = y;
+    saveConfigToServer();
+}
+
+function handlePixelColorChange(e) {
+    let color = e.target.value.trim();
+    if (/^#[0-9A-F]{6}$/i.test(color)) {
+        pixelColorPreview.style.backgroundColor = color;
+        appState.pixel_color = color;
+        saveConfigToServer();
+    }
+}
+
+function handlePixelMatchTypeChange(e) {
+    appState.pixel_match_type = e.target.value;
+    saveConfigToServer();
+}
+
+function handlePixelCooldownChange(e) {
+    let val = parseFloat(e.target.value);
+    if (isNaN(val) || val < 0.1) val = 0.1;
+    e.target.value = val;
+    appState.pixel_cooldown_s = val;
+    saveConfigToServer();
+}
+
+// Pixel picking countdown logic
+function startPixelPicking() {
+    pickerOverlay.classList.add("active");
+    let timeLeft = 3;
+    pickerCountdown.textContent = timeLeft;
+    
+    const interval = setInterval(() => {
+        timeLeft--;
+        if (timeLeft > 0) {
+            pickerCountdown.textContent = timeLeft;
+        } else {
+            clearInterval(interval);
+            // Trigger pick API
+            fetch("/api/pick")
+                .then(res => {
+                    if (!res.ok) throw new Error("Pick request failed");
+                    return res.json();
+                })
+                .then(data => {
+                    pixelXInput.value = data.x;
+                    pixelYInput.value = data.y;
+                    pixelColorInput.value = data.color;
+                    pixelColorPreview.style.backgroundColor = data.color;
+                    
+                    appState.pixel_x = data.x;
+                    appState.pixel_y = data.y;
+                    appState.pixel_color = data.color;
+                    
+                    saveConfigToServer();
+                })
+                .catch(err => {
+                    console.error("Error picking pixel color:", err);
+                })
+                .finally(() => {
+                    pickerOverlay.classList.remove("active");
+                });
+        }
+    }, 1000);
 }
