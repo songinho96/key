@@ -130,7 +130,14 @@ let appState = {
     jump_action_keycode: 8,
     jump_action_name: "C",
     minimap_offset_x: 0,
-    minimap_offset_y: 0
+    minimap_offset_y: 0,
+    // Mouse Macro config fields
+    mouse_macro_enabled: false,
+    mouse_interval_min: 1,
+    mouse_x1: 100,
+    mouse_y1: 200,
+    mouse_x2: 300,
+    mouse_y2: 400
 };
 let isRecording = false;
 let recordingTarget = "main"; // "main", "pixel", "jump", or "sched_{id}"
@@ -172,6 +179,16 @@ document.addEventListener("DOMContentLoaded", () => {
     pixelMatchType.addEventListener("change", handlePixelMatchTypeChange);
     btnRecordPixelKey.addEventListener("click", () => startKeyRecording("pixel"));
     pixelCooldownInput.addEventListener("change", handlePixelCooldownChange);
+
+    // Mouse Macro bindings
+    const mouseMacroToggle = document.getElementById("mouseMacroToggle");
+    const mouseIntervalInput = document.getElementById("mouseIntervalInput");
+    const btnPickMousePos1 = document.getElementById("btnPickMousePos1");
+    const btnPickMousePos2 = document.getElementById("btnPickMousePos2");
+    mouseMacroToggle.addEventListener("change", handleMouseMacroToggleChange);
+    mouseIntervalInput.addEventListener("change", handleMouseIntervalChange);
+    btnPickMousePos1.addEventListener("click", handleMousePos1Pick);
+    btnPickMousePos2.addEventListener("click", handleMousePos2Pick);
 
     // Move & Jump bindings
     jumpToggle.addEventListener("change", handleJumpToggleChange);
@@ -329,6 +346,19 @@ function updateUI() {
     minimapOffsetX.value = appState.minimap_offset_x;
     minimapOffsetY.value = appState.minimap_offset_y;
     updateMinimapMarkerPosition();
+
+    // Update Mouse Macro UI
+    const mouseMacroToggle = document.getElementById("mouseMacroToggle");
+    const mouseMacroBadge = document.getElementById("mouseMacroBadge");
+    const mouseIntervalInput = document.getElementById("mouseIntervalInput");
+    const mousePos1Display = document.getElementById("mousePos1Display");
+    const mousePos2Display = document.getElementById("mousePos2Display");
+    mouseMacroToggle.checked = appState.mouse_macro_enabled;
+    mouseMacroBadge.textContent = appState.mouse_macro_enabled ? "활성" : "비활성";
+    mouseMacroBadge.className = appState.mouse_macro_enabled ? "macro-badge active" : "macro-badge";
+    mouseIntervalInput.value = appState.mouse_interval_min;
+    mousePos1Display.textContent = `X:${appState.mouse_x1} Y:${appState.mouse_y1}`;
+    mousePos2Display.textContent = `X:${appState.mouse_x2} Y:${appState.mouse_y2}`;
     
     // Set warning banner visibility
     if (appState.macos_accessible === false) {
@@ -513,6 +543,14 @@ async function saveConfigToServer() {
                 jump_action_name: appState.jump_action_name,
                 minimap_offset_x: appState.minimap_offset_x,
                 minimap_offset_y: appState.minimap_offset_y,
+
+                // Mouse Macro fields
+                mouse_macro_enabled: appState.mouse_macro_enabled,
+                mouse_interval_min: appState.mouse_interval_min,
+                mouse_x1: appState.mouse_x1,
+                mouse_y1: appState.mouse_y1,
+                mouse_x2: appState.mouse_x2,
+                mouse_y2: appState.mouse_y2,
                 
                 // Scheduled macros
                 scheduled_macros: (appState.scheduled_macros || []).map(m => ({
@@ -670,6 +708,66 @@ function handlePixelCoordsChange() {
     appState.pixel_x = x;
     appState.pixel_y = y;
     saveConfigToServer();
+}
+
+// Mouse Macro Event Handlers
+function handleMouseMacroToggleChange(e) {
+    appState.mouse_macro_enabled = e.target.checked;
+    // Update badge
+    const badge = document.getElementById("mouseMacroBadge");
+    badge.textContent = appState.mouse_macro_enabled ? "활성" : "비활성";
+    badge.className = appState.mouse_macro_enabled ? "macro-badge active" : "macro-badge";
+    saveConfigToServer();
+}
+
+function handleMouseIntervalChange(e) {
+    let val = parseInt(e.target.value, 10);
+    if (isNaN(val) || val < 1) val = 1;
+    if (val > 60) val = 60;
+    e.target.value = val;
+    appState.mouse_interval_min = val;
+    saveConfigToServer();
+}
+
+function handleMousePos1Pick() {
+    startPixelPickingForMouse(1);
+}
+
+function handleMousePos2Pick() {
+    startPixelPickingForMouse(2);
+}
+
+function startPixelPickingForMouse(posIndex) {
+    pickerOverlay.classList.add("active");
+    let timeLeft = 3;
+    pickerCountdown.textContent = timeLeft;
+    const interval = setInterval(() => {
+        timeLeft--;
+        if (timeLeft > 0) {
+            pickerCountdown.textContent = timeLeft;
+        } else {
+            clearInterval(interval);
+            fetch("/api/pick")
+                .then(res => {
+                    if (!res.ok) throw new Error("Pick request failed");
+                    return res.json();
+                })
+                .then(data => {
+                    if (posIndex === 1) {
+                        appState.mouse_x1 = data.x;
+                        appState.mouse_y1 = data.y;
+                        document.getElementById("mousePos1Display").textContent = `X:${data.x} Y:${data.y}`;
+                    } else {
+                        appState.mouse_x2 = data.x;
+                        appState.mouse_y2 = data.y;
+                        document.getElementById("mousePos2Display").textContent = `X:${data.x} Y:${data.y}`;
+                    }
+                    saveConfigToServer();
+                })
+                .catch(err => console.error("Error picking mouse position:", err))
+                .finally(() => pickerOverlay.classList.remove("active"));
+        }
+    }, 1000);
 }
 
 function handlePixelColorChange(e) {

@@ -80,6 +80,7 @@
                         <button type="button" class="btn btn-xs preset-btn" data-ms="200">빠름 (200ms)</button>
                         <button type="button" class="btn btn-xs preset-btn" data-ms="1000">보통 (1초)</button>
                         <button type="button" class="btn btn-xs preset-btn" data-ms="5000">느림 (5초)</button>
+                    </div>
                 </div>
 
                 <!-- Anti-Idle Macro Box -->
@@ -94,6 +95,33 @@
                             <span class="switch-slider"></span>
                         </label>
                         <span class="macro-toggle-label-text">1분마다 우이동4번 + 좌이동4번 실행</span>
+                    </div>
+                </div>
+
+                <!-- Mouse Macro Box -->
+                <div class="setting-group mouse-macro-group">
+                    <div class="setting-label-row">
+                        <label for="mouseMacroToggle">Mouse Macro (분 단위)</label>
+                        <span class="macro-badge" id="mouseMacroBadge">비활성</span>
+                    </div>
+                    <div class="macro-toggle-row">
+                        <label class="switch">
+                            <input type="checkbox" id="mouseMacroToggle">
+                            <span class="switch-slider"></span>
+                        </label>
+                        <span class="macro-toggle-label-text">설정한 간격(분)마다 마우스 이동 및 클릭 수행</span>
+                    </div>
+                    <div class="setting-group interval-config">
+                        <label for="mouseIntervalInput">주기 (분)</label>
+                        <input type="number" id="mouseIntervalInput" min="1" max="60" value="1">
+                    </div>
+                    <div class="setting-row">
+                        <button type="button" class="btn btn-secondary btn-xs picker-btn" id="btnPickMousePos1">🎯 위치 1 픽킹</button>
+                        <span id="mousePos1Display">X:0 Y:0</span>
+                    </div>
+                    <div class="setting-row">
+                        <button type="button" class="btn btn-secondary btn-xs picker-btn" id="btnPickMousePos2">🎯 위치 2 픽킹</button>
+                        <span id="mousePos2Display">X:0 Y:0</span>
                     </div>
                 </div>
 
