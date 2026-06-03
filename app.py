@@ -44,7 +44,9 @@ state = {
     "jump_cooldown_s": 20.0,
     "jump_action_code_str": "KeyC",
     "jump_action_keycode": 8 if IS_MAC else 0x43,
-    "jump_action_name": "C"
+    "jump_action_name": "C",
+    "minimap_offset_x": 0,
+    "minimap_offset_y": 0
 }
 state_lock = threading.Lock()
 sleep_event = threading.Event()
@@ -414,15 +416,23 @@ def pack_rgb_to_bmp(width, height, raw_bgra):
     return file_header + info_header + raw_bgra
 
 def capture_minimap_as_bmp():
-    """Captures the top-left minimap region (400x400 logical points) and encodes it as BMP bytes without external libraries"""
+    """Captures the minimap region based on configured offsets (400x400 logical points) and encodes it as BMP bytes"""
     scale = get_screen_scale()
+    
+    with state_lock:
+        offset_x = state.get("minimap_offset_x", 0)
+        offset_y = state.get("minimap_offset_y", 0)
+        
     search_width = int(400 * scale)
     search_height = int(400 * scale)
+    
+    phys_offset_x = int(offset_x * scale)
+    phys_offset_y = int(offset_y * scale)
     
     if IS_MAC and cg_loaded:
         try:
             display_id = cg.CGMainDisplayID()
-            rect = CGRect(CGPoint(0, 0), CGSize(search_width, search_height))
+            rect = CGRect(CGPoint(phys_offset_x, phys_offset_y), CGSize(search_width, search_height))
             image = cg.CGDisplayCreateImageForRect(display_id, rect)
             if image:
                 provider = cg.CGImageGetDataProvider(image)
@@ -434,15 +444,11 @@ def capture_minimap_as_bmp():
                     
                     clean_bgra = bytearray(search_width * search_height * 4)
                     
-                    # Copy row by row to strip out row-padding bytes
+                    # Copy row by row safely using python bytearray slices
                     for y in range(search_height):
                         src_offset = y * bytes_per_row
                         dest_offset = y * search_width * 4
-                        ctypes.memmove(
-                            (ctypes.c_char * (search_width * 4)).from_buffer(clean_bgra, dest_offset),
-                            ctypes.byref(char_ptr, src_offset),
-                            search_width * 4
-                        )
+                        clean_bgra[dest_offset : dest_offset + search_width * 4] = char_ptr[src_offset : src_offset + search_width * 4]
                         
                     cf.CFRelease(data)
                     cf.CFRelease(image)
@@ -458,7 +464,7 @@ def capture_minimap_as_bmp():
             h_old = ctypes.windll.gdi32.SelectObject(hdc_mem, h_bitmap)
             
             # SRCCOPY BitBlt
-            ctypes.windll.gdi32.BitBlt(hdc_mem, 0, 0, search_width, search_height, hdc_screen, 0, 0, 0x00CC0020)
+            ctypes.windll.gdi32.BitBlt(hdc_mem, 0, 0, search_width, search_height, hdc_screen, phys_offset_x, phys_offset_y, 0x00CC0020)
             
             class BITMAPINFOHEADER(ctypes.Structure):
                 _fields_ = [
@@ -496,17 +502,23 @@ def capture_minimap_as_bmp():
     return None
 
 def find_character_yellow_dot():
-    """Scans the top-left area (minimap region) for the character's yellow dot pixel and returns its logical coordinates (centroid of all matching pixels)"""
+    """Scans the configured minimap area for the character's yellow dot pixel and returns its logical coordinates (relative to the minimap area)"""
     scale = get_screen_scale()
     
-    # Scale search area based on screen DPI scale to cover the actual minimap (approx 400 logical points wide)
+    with state_lock:
+        offset_x = state.get("minimap_offset_x", 0)
+        offset_y = state.get("minimap_offset_y", 0)
+        
     search_width = int(400 * scale)
     search_height = int(400 * scale)
+    
+    phys_offset_x = int(offset_x * scale)
+    phys_offset_y = int(offset_y * scale)
     
     if IS_MAC and cg_loaded:
         try:
             display_id = cg.CGMainDisplayID()
-            rect = CGRect(CGPoint(0, 0), CGSize(search_width, search_height))
+            rect = CGRect(CGPoint(phys_offset_x, phys_offset_y), CGSize(search_width, search_height))
             image = cg.CGDisplayCreateImageForRect(display_id, rect)
             if image:
                 provider = cg.CGImageGetDataProvider(image)
@@ -548,7 +560,7 @@ def find_character_yellow_dot():
             h_old = ctypes.windll.gdi32.SelectObject(hdc_mem, h_bitmap)
             
             # SRCCOPY BitBlt
-            ctypes.windll.gdi32.BitBlt(hdc_mem, 0, 0, search_width, search_height, hdc_screen, 0, 0, 0x00CC0020)
+            ctypes.windll.gdi32.BitBlt(hdc_mem, 0, 0, search_width, search_height, hdc_screen, phys_offset_x, phys_offset_y, 0x00CC0020)
             
             class BITMAPINFOHEADER(ctypes.Structure):
                 _fields_ = [
@@ -922,6 +934,8 @@ def load_config():
                     state["jump_cooldown_s"] = data.get("jump_cooldown_s", 20.0)
                     state["jump_action_code_str"] = data.get("jump_action_code_str", "KeyC")
                     state["jump_action_name"] = data.get("jump_action_name", "C")
+                    state["minimap_offset_x"] = data.get("minimap_offset_x", 0)
+                    state["minimap_offset_y"] = data.get("minimap_offset_y", 0)
                     
                     # Resolve keycodes
                     state["keycode"] = resolve_keycode(state["key_code_str"])
@@ -957,7 +971,9 @@ def save_config():
             "jump_y": state["jump_y"],
             "jump_cooldown_s": state["jump_cooldown_s"],
             "jump_action_code_str": state["jump_action_code_str"],
-            "jump_action_name": state["jump_action_name"]
+            "jump_action_name": state["jump_action_name"],
+            "minimap_offset_x": state["minimap_offset_x"],
+            "minimap_offset_y": state["minimap_offset_y"]
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -1125,6 +1141,10 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                         state["jump_action_keycode"] = resolve_keycode(state["jump_action_code_str"])
                     if "jump_action_name" in data:
                         state["jump_action_name"] = str(data["jump_action_name"])
+                    if "minimap_offset_x" in data:
+                        state["minimap_offset_x"] = int(data["minimap_offset_x"])
+                    if "minimap_offset_y" in data:
+                        state["minimap_offset_y"] = int(data["minimap_offset_y"])
                         
                 save_config()
                 sleep_event.set()  # Apply changes immediately

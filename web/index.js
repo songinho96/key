@@ -75,6 +75,8 @@ const minimapViewer = document.getElementById("minimapViewer");
 const minimapImage = document.getElementById("minimapImage");
 const minimapPlaceholder = document.getElementById("minimapPlaceholder");
 const minimapMarker = document.getElementById("minimapMarker");
+const minimapOffsetX = document.getElementById("minimapOffsetX");
+const minimapOffsetY = document.getElementById("minimapOffsetY");
 const jumpKeyCapDisplay = document.getElementById("jumpKeyCapDisplay");
 const btnRecordJumpKey = document.getElementById("btnRecordJumpKey");
 const jumpCooldownInput = document.getElementById("jumpCooldownInput");
@@ -117,7 +119,9 @@ let appState = {
     jump_cooldown_s: 20.0,
     jump_action_code_str: "KeyC",
     jump_action_keycode: 8,
-    jump_action_name: "C"
+    jump_action_name: "C",
+    minimap_offset_x: 0,
+    minimap_offset_y: 0
 };
 let isRecording = false;
 let recordingTarget = "main"; // "main", "pixel", or "jump"
@@ -167,6 +171,8 @@ document.addEventListener("DOMContentLoaded", () => {
     minimapViewer.addEventListener("click", handleMinimapClick);
     btnRecordJumpKey.addEventListener("click", () => startKeyRecording("jump"));
     jumpCooldownInput.addEventListener("change", handleJumpCooldownChange);
+    minimapOffsetX.addEventListener("change", handleMinimapOffsetChange);
+    minimapOffsetY.addEventListener("change", handleMinimapOffsetChange);
     
     // Presets
     presetBtns.forEach(btn => {
@@ -242,6 +248,8 @@ function startPolling() {
                     appState.jump_action_code_str = newState.jump_action_code_str;
                     appState.jump_action_keycode = newState.jump_action_keycode;
                     appState.jump_action_name = newState.jump_action_name;
+                    appState.minimap_offset_x = newState.minimap_offset_x;
+                    appState.minimap_offset_y = newState.minimap_offset_y;
                     
                     updateMacroBadge();
                     updateHumanizerBadge();
@@ -292,6 +300,8 @@ function updateUI() {
     jumpYInput.value = appState.jump_y;
     jumpKeyCapDisplay.textContent = appState.jump_action_name;
     jumpCooldownInput.value = appState.jump_cooldown_s;
+    minimapOffsetX.value = appState.minimap_offset_x;
+    minimapOffsetY.value = appState.minimap_offset_y;
     updateMinimapMarkerPosition();
     
     updateUIStateOnly();
@@ -463,7 +473,9 @@ async function saveConfigToServer() {
                 jump_y: appState.jump_y,
                 jump_cooldown_s: appState.jump_cooldown_s,
                 jump_action_code_str: appState.jump_action_code_str,
-                jump_action_name: appState.jump_action_name
+                jump_action_name: appState.jump_action_name,
+                minimap_offset_x: appState.minimap_offset_x,
+                minimap_offset_y: appState.minimap_offset_y
             })
         });
         if (response.ok) {
@@ -768,4 +780,18 @@ function updateJumpBadge() {
         jumpBadge.className = "jump-badge";
         jumpConfigContainer.style.display = "none";
     }
+}
+
+function handleMinimapOffsetChange(e) {
+    const targetId = e.target.id;
+    let val = parseInt(e.target.value);
+    if (isNaN(val) || val < 0) val = 0;
+    e.target.value = val;
+    
+    if (targetId === "minimapOffsetX") {
+        appState.minimap_offset_x = val;
+    } else {
+        appState.minimap_offset_y = val;
+    }
+    saveConfigToServer();
 }

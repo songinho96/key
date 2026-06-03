@@ -188,6 +188,22 @@
                     </div>
                     
                     <div class="pixel-config-container" id="jumpConfigContainer" style="display: none;">
+                        <div class="pixel-row" style="margin-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 8px; gap: 8px;">
+                            <div class="pixel-field">
+                                <label for="minimapOffsetX">미니맵 영역 시작 X</label>
+                                <div class="input-container-small">
+                                    <input type="number" id="minimapOffsetX" min="0" max="4000" value="0">
+                                    <span class="input-unit-small">px</span>
+                                </div>
+                            </div>
+                            <div class="pixel-field">
+                                <label for="minimapOffsetY">미니맵 영역 시작 Y</label>
+                                <div class="input-container-small">
+                                    <input type="number" id="minimapOffsetY" min="0" max="4000" value="0">
+                                    <span class="input-unit-small">px</span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="pixel-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
                             <button type="button" class="btn btn-secondary btn-xs picker-btn" id="btnCaptureMinimap" style="width: 100%; height: 36px; font-weight: 600; background: linear-gradient(135deg, #f59e0b, #d97706); border: none; color: white;">
                                 📸 현재 게임 미니맵 화면 가져오기
