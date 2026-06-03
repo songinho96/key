@@ -115,11 +115,20 @@
 
                     <!-- Add Action Form -->
                     <div class="add-action-form" style="margin-top: 12px; padding: 10px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.1); border-radius: 8px;">
-                        <label style="font-size: 11px; font-weight: 700; margin-bottom: 6px; display: block; color: var(--text-primary);">➕ 새 동작 추가</label>
+                        <label style="font-size: 11px; font-weight: 700; margin-bottom: 6px; display: block; color: var(--text-primary);">➕ 새 동작 추가 (최대 2개 동시 누르기)</label>
+                        
+                        <div class="pixel-row" style="gap: 6px; margin-bottom: 8px; flex-wrap: nowrap;">
+                            <div class="pixel-field" style="flex: 1;">
+                                <label style="font-size: 10px; color: var(--text-secondary);">동작 유지 시간 (초)</label>
+                                <input type="number" id="actionDurationInput" min="0.1" step="0.1" value="2.0" style="height: 32px; font-size: 12px; width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-primary); padding: 4px 8px;">
+                            </div>
+                        </div>
+
+                        <!-- Action 1 config -->
                         <div class="pixel-row" style="gap: 6px; margin-bottom: 6px; flex-wrap: nowrap;">
-                            <div class="pixel-field" style="flex: 2;">
-                                <label style="font-size: 10px; color: var(--text-secondary);">동작 종류</label>
-                                <select id="actionTypeSelect" class="select-input" style="height: 32px; font-size: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-primary); width: 100%;">
+                            <div class="pixel-field" style="flex: 1;">
+                                <label style="font-size: 10px; color: var(--text-secondary);">동작 1 (필수)</label>
+                                <select id="actionTypeSelect1" class="select-input" style="height: 32px; font-size: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-primary); width: 100%;">
                                     <option value="right">우측 이동 (Right)</option>
                                     <option value="left">좌측 이동 (Left)</option>
                                     <option value="up">위로 이동 (Up)</option>
@@ -127,19 +136,40 @@
                                     <option value="key">특정 키 입력 (Key)</option>
                                 </select>
                             </div>
-                            <div class="pixel-field" style="flex: 1;">
-                                <label style="font-size: 10px; color: var(--text-secondary);">시간 (초)</label>
-                                <input type="number" id="actionDurationInput" min="0.1" step="0.1" value="2.0" style="height: 32px; font-size: 12px; width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-primary); padding: 4px 8px;">
+                        </div>
+                        <!-- Key Card 1 -->
+                        <div id="actionKeyCardWrapper1" style="display: none; margin-bottom: 8px;">
+                            <div class="key-binder-card-small" id="actionKeyBinderCard1" style="height: 36px; padding: 4px 8px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;">
+                                <div class="key-display-small">
+                                    <span class="key-cap-small" id="actionKeyCapDisplay1" style="font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; color: var(--color-cyan);">Space</span>
+                                </div>
+                                <button type="button" class="btn btn-secondary btn-xs" id="btnRecordActionKey1" style="padding: 2px 6px; font-size: 11px;">
+                                    키 설정
+                                </button>
                             </div>
                         </div>
-                        
-                        <!-- Custom Key Section (Only displayed when type is 'key') -->
-                        <div id="actionKeyCardWrapper" style="display: none; margin-bottom: 8px;">
-                            <div class="key-binder-card-small" id="actionKeyBinderCard" style="height: 36px; padding: 4px 8px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;">
+
+                        <!-- Action 2 config -->
+                        <div class="pixel-row" style="gap: 6px; margin-bottom: 6px; flex-wrap: nowrap;">
+                            <div class="pixel-field" style="flex: 1;">
+                                <label style="font-size: 10px; color: var(--text-secondary);">동작 2 (선택 - 동시 입력)</label>
+                                <select id="actionTypeSelect2" class="select-input" style="height: 32px; font-size: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-primary); width: 100%;">
+                                    <option value="none">없음 (단일 입력)</option>
+                                    <option value="right">우측 이동 (Right)</option>
+                                    <option value="left">좌측 이동 (Left)</option>
+                                    <option value="up">위로 이동 (Up)</option>
+                                    <option value="down">아래 이동 (Down)</option>
+                                    <option value="key">특정 키 입력 (Key)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <!-- Key Card 2 -->
+                        <div id="actionKeyCardWrapper2" style="display: none; margin-bottom: 8px;">
+                            <div class="key-binder-card-small" id="actionKeyBinderCard2" style="height: 36px; padding: 4px 8px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;">
                                 <div class="key-display-small">
-                                    <span class="key-cap-small" id="actionKeyCapDisplay" style="font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; color: var(--color-cyan);">Space</span>
+                                    <span class="key-cap-small" id="actionKeyCapDisplay2" style="font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; color: var(--color-cyan);">Space</span>
                                 </div>
-                                <button type="button" class="btn btn-secondary btn-xs" id="btnRecordActionKey" style="padding: 2px 6px; font-size: 11px;">
+                                <button type="button" class="btn btn-secondary btn-xs" id="btnRecordActionKey2" style="padding: 2px 6px; font-size: 11px;">
                                     키 설정
                                 </button>
                             </div>

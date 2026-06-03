@@ -142,8 +142,9 @@ let appState = {
     mouse_y2: 400
 };
 let isRecording = false;
-let recordingTarget = "main"; // "main", "pixel", "jump", "sched_{id}", or "action_key"
-let tempActionKey = { code_str: "Space", name: "Space" };
+let recordingTarget = "main"; // "main", "pixel", "jump", "sched_{id}", "action_key1", or "action_key2"
+let tempActionKey1 = { code_str: "Space", name: "Space" };
+let tempActionKey2 = { code_str: "Space", name: "Space" };
 let recordingSchedId = null;   // active scheduled macro id during recording
 let pollIntervalId = null;
 let isUpdatingConfig = false;
@@ -173,23 +174,42 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     
     // Custom Sequence form bindings
-    const actionTypeSelect = document.getElementById("actionTypeSelect");
-    const actionKeyCardWrapper = document.getElementById("actionKeyCardWrapper");
-    const btnRecordActionKey = document.getElementById("btnRecordActionKey");
+    const actionTypeSelect1 = document.getElementById("actionTypeSelect1");
+    const actionKeyCardWrapper1 = document.getElementById("actionKeyCardWrapper1");
+    const btnRecordActionKey1 = document.getElementById("btnRecordActionKey1");
+    
+    const actionTypeSelect2 = document.getElementById("actionTypeSelect2");
+    const actionKeyCardWrapper2 = document.getElementById("actionKeyCardWrapper2");
+    const btnRecordActionKey2 = document.getElementById("btnRecordActionKey2");
+    
     const btnAddSeqAction = document.getElementById("btnAddSeqAction");
     
-    if (actionTypeSelect) {
-        actionTypeSelect.addEventListener("change", (e) => {
+    if (actionTypeSelect1) {
+        actionTypeSelect1.addEventListener("change", (e) => {
             if (e.target.value === "key") {
-                actionKeyCardWrapper.style.display = "block";
+                actionKeyCardWrapper1.style.display = "block";
             } else {
-                actionKeyCardWrapper.style.display = "none";
+                actionKeyCardWrapper1.style.display = "none";
             }
         });
     }
-    if (btnRecordActionKey) {
-        btnRecordActionKey.addEventListener("click", () => startKeyRecording("action_key"));
+    if (btnRecordActionKey1) {
+        btnRecordActionKey1.addEventListener("click", () => startKeyRecording("action_key1"));
     }
+    
+    if (actionTypeSelect2) {
+        actionTypeSelect2.addEventListener("change", (e) => {
+            if (e.target.value === "key") {
+                actionKeyCardWrapper2.style.display = "block";
+            } else {
+                actionKeyCardWrapper2.style.display = "none";
+            }
+        });
+    }
+    if (btnRecordActionKey2) {
+        btnRecordActionKey2.addEventListener("click", () => startKeyRecording("action_key2"));
+    }
+    
     if (btnAddSeqAction) {
         btnAddSeqAction.addEventListener("click", handleAddSeqAction);
     }
@@ -667,12 +687,21 @@ async function handleGlobalKeyDown(event) {
             recordingSchedId = null;
             stopKeyRecording();
             return; // Skip updateUI and saveConfigToServer below (already done in _applySchedKey)
-        } else if (recordingTarget === "action_key") {
-            tempActionKey = {
+        } else if (recordingTarget === "action_key1") {
+            tempActionKey1 = {
                 code_str: keyDetails.code_str,
                 name: keyDetails.name
             };
-            const display = document.getElementById("actionKeyCapDisplay");
+            const display = document.getElementById("actionKeyCapDisplay1");
+            if (display) display.textContent = keyDetails.name;
+            stopKeyRecording();
+            return;
+        } else if (recordingTarget === "action_key2") {
+            tempActionKey2 = {
+                code_str: keyDetails.code_str,
+                name: keyDetails.name
+            };
+            const display = document.getElementById("actionKeyCapDisplay2");
             if (display) display.textContent = keyDetails.name;
             stopKeyRecording();
             return;
@@ -1263,18 +1292,32 @@ function renderMacroActions() {
         const card = document.createElement("div");
         card.className = "action-seq-card";
         
-        let typeLabel = act.type;
-        let typeClass = act.type;
-        if (act.type === "right") typeLabel = "우측";
-        else if (act.type === "left") typeLabel = "좌측";
-        else if (act.type === "up") typeLabel = "상측";
-        else if (act.type === "down") typeLabel = "하측";
-        else if (act.type === "key") typeLabel = act.key_name || "키";
+        // Resolve key text and type classes
+        let keysList = act.keys || [];
+        if (keysList.length === 0) {
+            // Fallback for old data schema
+            keysList = [{
+                type: act.type || "right",
+                key_code_str: act.key_code_str,
+                key_name: act.key_name
+            }];
+        }
+        
+        const badgeElements = keysList.map(k => {
+            let label = k.type;
+            if (k.type === "right") label = "우측";
+            else if (k.type === "left") label = "좌측";
+            else if (k.type === "up") label = "상측";
+            else if (k.type === "down") label = "하측";
+            else if (k.type === "key") label = k.key_name || "키";
+            
+            return `<span class="action-seq-badge ${k.type}">${label}</span>`;
+        }).join(" + ");
         
         card.innerHTML = `
             <div class="action-seq-info">
                 <span class="action-seq-index">${idx + 1}</span>
-                <span class="action-seq-badge ${typeClass}">${typeLabel}</span>
+                <span style="display: inline-flex; align-items: center; gap: 4px;">${badgeElements}</span>
                 <span class="action-seq-duration">${act.duration_s}초 누름</span>
             </div>
             <button type="button" class="action-seq-delete-btn" data-index="${idx}" title="삭제">
@@ -1301,24 +1344,41 @@ function deleteMacroAction(index) {
 
 // Add new action to sequence
 function handleAddSeqAction() {
-    const typeSelect = document.getElementById("actionTypeSelect");
+    const typeSelect1 = document.getElementById("actionTypeSelect1");
+    const typeSelect2 = document.getElementById("actionTypeSelect2");
     const durationInput = document.getElementById("actionDurationInput");
     
-    if (!typeSelect || !durationInput) return;
+    if (!typeSelect1 || !typeSelect2 || !durationInput) return;
     
-    const type = typeSelect.value;
     let duration = parseFloat(durationInput.value);
     if (isNaN(duration) || duration < 0.1) duration = 1.0;
     
-    let newAction = {
-        type: type,
+    const keys = [];
+    
+    // 동작 1 추가
+    const t1 = typeSelect1.value;
+    const k1 = { type: t1 };
+    if (t1 === "key") {
+        k1.key_code_str = tempActionKey1.code_str;
+        k1.key_name = tempActionKey1.name;
+    }
+    keys.push(k1);
+    
+    // 동작 2 추가 (none이 아닐 시)
+    const t2 = typeSelect2.value;
+    if (t2 !== "none") {
+        const k2 = { type: t2 };
+        if (t2 === "key") {
+            k2.key_code_str = tempActionKey2.code_str;
+            k2.key_name = tempActionKey2.name;
+        }
+        keys.push(k2);
+    }
+    
+    const newAction = {
+        keys: keys,
         duration_s: duration
     };
-    
-    if (type === "key") {
-        newAction.key_code_str = tempActionKey.code_str;
-        newAction.key_name = tempActionKey.name;
-    }
     
     if (!appState.macro_actions) appState.macro_actions = [];
     appState.macro_actions.push(newAction);

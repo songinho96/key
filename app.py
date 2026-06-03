@@ -761,7 +761,6 @@ def presser_thread_func():
                 
                 # Execute actions in sequence
                 for idx, act in enumerate(actions):
-                    act_type = act.get("type", "right")
                     duration = max(0.05, float(act.get("duration_s", 1.0)))
                     
                     # Apply humanizer jitter to duration if enabled (±8%)
@@ -771,26 +770,44 @@ def presser_thread_func():
                     else:
                         actual_duration = duration
                     
-                    # Determine target keycode
-                    kc = None
-                    act_name = act_type
-                    if act_type == "left":
-                        kc = left_kc
-                    elif act_type == "right":
-                        kc = right_kc
-                    elif act_type == "up":
-                        kc = up_kc
-                    elif act_type == "down":
-                        kc = down_kc
-                    elif act_type == "key":
-                        kc = act.get("keycode")
-                        act_name = f"Key ({act.get('key_name', '?')})"
+                    # Gather all keycodes for this action
+                    kcs = []
+                    act_names = []
+                    act_keys = act.get("keys", [])
+                    if not act_keys:
+                        # Fallback for old schema
+                        act_keys = [{
+                            "type": act.get("type", "right"),
+                            "key_code_str": act.get("key_code_str"),
+                            "key_name": act.get("key_name"),
+                            "keycode": act.get("keycode")
+                        }]
                     
-                    if kc is not None:
-                        print(f"[Macro] Action {idx+1}/{len(actions)}: Holding {act_name} for {actual_duration:.2f} seconds...")
-                        send_key_down(kc)
+                    for k_info in act_keys:
+                        t = k_info.get("type", "right")
+                        kc = None
+                        if t == "left":
+                            kc = left_kc
+                        elif t == "right":
+                            kc = right_kc
+                        elif t == "up":
+                            kc = up_kc
+                        elif t == "down":
+                            kc = down_kc
+                        elif t == "key":
+                            kc = k_info.get("keycode")
+                            
+                        if kc is not None:
+                            kcs.append(kc)
+                            act_names.append(t if t != "key" else f"Key({k_info.get('key_name', '?')})")
+                    
+                    if kcs:
+                        print(f"[Macro] Action {idx+1}/{len(actions)}: Holding {', '.join(act_names)} for {actual_duration:.2f} seconds...")
+                        for kc in kcs:
+                            send_key_down(kc)
                         time.sleep(actual_duration)
-                        send_key_up(kc)
+                        for kc in kcs:
+                            send_key_up(kc)
                     
                     # Brief pause between sequential actions (randomized if humanizer active)
                     pause_dur = random.uniform(0.15, 0.35) if humanizer_enabled else 0.2
@@ -1064,12 +1081,21 @@ def load_config():
                     state["macro_enabled"] = data.get("macro_enabled", False)
                     state["macro_interval_s"] = data.get("macro_interval_s", 60.0)
                     state["macro_actions"] = data.get("macro_actions", [
-                        {"type": "right", "duration_s": 3.0},
-                        {"type": "left", "duration_s": 3.0}
+                        {"keys": [{"type": "right"}], "duration_s": 3.0},
+                        {"keys": [{"type": "left"}], "duration_s": 3.0}
                     ])
                     for act in state["macro_actions"]:
-                        if act.get("type") == "key" and "key_code_str" in act:
-                            act["keycode"] = resolve_keycode(act["key_code_str"])
+                        act_keys = act.get("keys", [])
+                        if not act_keys:
+                            act_keys = [{
+                                "type": act.get("type", "right"),
+                                "key_code_str": act.get("key_code_str"),
+                                "key_name": act.get("key_name")
+                            }]
+                            act["keys"] = act_keys
+                        for k_info in act_keys:
+                            if k_info.get("type") == "key" and "key_code_str" in k_info:
+                                k_info["keycode"] = resolve_keycode(k_info["key_code_str"])
                     state["humanizer_enabled"] = data.get("humanizer_enabled", True)
                     
                     # Pixel Trigger Config
@@ -1124,7 +1150,13 @@ def save_config():
             "macro_enabled": state["macro_enabled"],
             "macro_interval_s": state["macro_interval_s"],
             "macro_actions": [
-                {k: v for k, v in act.items() if not k.startswith("_")}
+                {
+                    "duration_s": act.get("duration_s", 1.0),
+                    "keys": [
+                        {k: v for k, v in k_info.items() if not k.startswith("_")}
+                        for k_info in act.get("keys", [])
+                    ]
+                }
                 for act in state.get("macro_actions", [])
             ],
             "humanizer_enabled": state["humanizer_enabled"],
@@ -1298,8 +1330,10 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                         raw_actions = data["macro_actions"]
                         if isinstance(raw_actions, list):
                             for act in raw_actions:
-                                if act.get("type") == "key" and "key_code_str" in act:
-                                    act["keycode"] = resolve_keycode(act["key_code_str"])
+                                act_keys = act.get("keys", [])
+                                for k_info in act_keys:
+                                    if k_info.get("type") == "key" and "key_code_str" in k_info:
+                                        k_info["keycode"] = resolve_keycode(k_info["key_code_str"])
                             state["macro_actions"] = raw_actions
                     if "humanizer_enabled" in data:
                         state["humanizer_enabled"] = bool(data["humanizer_enabled"])
