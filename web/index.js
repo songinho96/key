@@ -45,6 +45,8 @@ const recordingOverlay = document.getElementById("recordingOverlay");
 const btnCancelRecord = document.getElementById("btnCancelRecord");
 const macroToggle = document.getElementById("macroToggle");
 const macroBadge = document.getElementById("macroBadge");
+const humanizerToggle = document.getElementById("humanizerToggle");
+const humanizerBadge = document.getElementById("humanizerBadge");
 
 // Stat Elements
 const statCount = document.getElementById("statCount");
@@ -63,7 +65,8 @@ let appState = {
     key_name: "Space",
     interval_ms: 1000,
     count: 0,
-    macro_enabled: false
+    macro_enabled: false,
+    humanizer_enabled: true
 };
 let isRecording = false;
 let pollIntervalId = null;
@@ -89,6 +92,9 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Macro toggle binding
     macroToggle.addEventListener("change", handleMacroToggleChange);
+    
+    // Humanizer toggle binding
+    humanizerToggle.addEventListener("change", handleHumanizerToggleChange);
     
     // Presets
     presetBtns.forEach(btn => {
@@ -145,7 +151,9 @@ function startPolling() {
                     appState.key_name = newState.key_name;
                     appState.interval_ms = newState.interval_ms;
                     appState.macro_enabled = newState.macro_enabled;
+                    appState.humanizer_enabled = newState.humanizer_enabled;
                     updateMacroBadge();
+                    updateHumanizerBadge();
                 }
                 
                 updateUIStateOnly();
@@ -171,6 +179,7 @@ function updateUI() {
     
     // Update macro toggle state
     updateMacroBadge();
+    updateHumanizerBadge();
     
     updateUIStateOnly();
 }
@@ -179,6 +188,24 @@ function handleMacroToggleChange(e) {
     appState.macro_enabled = e.target.checked;
     updateMacroBadge();
     saveConfigToServer();
+}
+
+function handleHumanizerToggleChange(e) {
+    appState.humanizer_enabled = e.target.checked;
+    updateHumanizerBadge();
+    saveConfigToServer();
+}
+
+function updateHumanizerBadge() {
+    if (appState.humanizer_enabled) {
+        humanizerBadge.textContent = "활성";
+        humanizerBadge.className = "humanizer-badge active";
+        humanizerToggle.checked = true;
+    } else {
+        humanizerBadge.textContent = "비활성";
+        humanizerBadge.className = "humanizer-badge";
+        humanizerToggle.checked = false;
+    }
 }
 
 function updateMacroBadge() {
@@ -292,7 +319,8 @@ async function saveConfigToServer() {
                 key_code_str: appState.key_code_str,
                 key_name: appState.key_name,
                 interval_ms: appState.interval_ms,
-                macro_enabled: appState.macro_enabled
+                macro_enabled: appState.macro_enabled,
+                humanizer_enabled: appState.humanizer_enabled
             })
         });
         if (response.ok) {

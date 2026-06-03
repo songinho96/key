@@ -6,31 +6,24 @@ import json
 import threading
 import webbrowser
 import platform
+import random
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Detect OS
 IS_MAC = platform.system() == "Darwin"
 IS_WINDOWS = platform.system() == "Windows"
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
-
 # Configuration and State
 CONFIG_FILE = "config.json"
 state = {
     "running": False,
-    "key_code_str": "Space", # Standard JS KeyboardEvent.code
-    "keycode": 49,          # Resolved OS-specific virtual code
+    "key_code_str": "Space",    # Standard JS KeyboardEvent.code
+    "keycode": 49,             # Resolved OS-specific virtual code
     "key_name": "Space",
     "interval_ms": 1000,
     "count": 0,
-    "macro_enabled": False
+    "macro_enabled": False,
+    "humanizer_enabled": True  # Anti-Detection (Humanizer) Mode
 }
 state_lock = threading.Lock()
 sleep_event = threading.Event()
@@ -88,6 +81,15 @@ def resolve_keycode(key_code_str):
     elif IS_WINDOWS:
         return WIN_KEY_CODES.get(key_code_str, 0x20)  # Fallback to Windows Space (0x20)
     return 0
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
 
 # Try loading macOS CoreGraphics APIs
 cg_loaded = False
@@ -158,6 +160,12 @@ if IS_WINDOWS:
 
 def send_keypress(keycode):
     """Simulates a physical key down and key up event based on the current OS"""
+    with state_lock:
+        humanizer_enabled = state["humanizer_enabled"]
+        
+    # Micro key hold duration (40ms ~ 80ms if humanizer is active, else 50ms)
+    hold_time = random.uniform(0.04, 0.08) if humanizer_enabled else 0.05
+    
     if IS_MAC:
         if not cg_loaded:
             print(f"[Mac Simulated Keystroke] OS Code: {keycode}")
@@ -167,7 +175,7 @@ def send_keypress(keycode):
             event_up = cg.CGEventCreateKeyboardEvent(None, keycode, False)
             if event_down and event_up:
                 cg.CGEventPost(0, event_down)
-                time.sleep(0.05)  # 50ms hold time to ensure games capture the key press
+                time.sleep(hold_time)
                 cg.CGEventPost(0, event_up)
                 cf.CFRelease(event_down)
                 cf.CFRelease(event_up)
@@ -182,18 +190,16 @@ def send_keypress(keycode):
             extra = ctypes.c_void_p(0)
             
             # Translate VK Code to Hardware ScanCode for maximum compatibility with DirectInput/DirectX games
-            # MapVirtualKeyW(keycode, 0) -> maps VK to ScanCode
             scan_code = user32.MapVirtualKeyW(keycode, 0)
             
             # Check if it is an extended key (such as Left, Up, Right, Down arrows, Delete, etc.)
-            # Extended keys on Windows need the KEYEVENTF_EXTENDEDKEY flag (0x0001)
             is_extended = keycode in [0x25, 0x26, 0x27, 0x28, 0x2E, 0x2D, 0x24, 0x23, 0x21, 0x22]
             
             flags_down = 0x0008  # KEYEVENTF_SCANCODE
             flags_up = 0x0008 | 0x0002  # KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP
             
             if is_extended:
-                flags_down |= 0x0001  # Add KEYEVENTF_EXTENDEDKEY
+                flags_down |= 0x0001
                 flags_up |= 0x0001
                 
             # Key Down struct using Scancode
@@ -208,7 +214,7 @@ def send_keypress(keycode):
             
             # Post events using native user32 SendInput
             user32.SendInput(1, ctypes.byref(input_down), ctypes.sizeof(input_down))
-            time.sleep(0.05)  # 50ms hold time to ensure games capture the key press
+            time.sleep(hold_time)
             user32.SendInput(1, ctypes.byref(input_up), ctypes.sizeof(input_up))
         except Exception as e:
             print(f"Error simulating Windows keycode {keycode}: {e}")
@@ -219,50 +225,89 @@ def send_keypress(keycode):
 def presser_thread_func():
     """Background worker thread executing keypress loop at specified intervals"""
     global state
+    
     last_macro_time = time.time()
+    next_macro_delay = 60.0  # Dynamic macro delay target (will be randomized if humanizer is active)
     
     while True:
         with state_lock:
             running = state["running"]
             keycode = state["keycode"]
-            interval = state["interval_ms"] / 1000.0
+            interval_ms = state["interval_ms"]
             macro_enabled = state["macro_enabled"]
+            humanizer_enabled = state["humanizer_enabled"]
             
         if running:
-            # Check if 60 seconds (1 minute) have passed since last macro run
-            current_time = time.time()
-            if macro_enabled and (current_time - last_macro_time >= 60.0):
-                print("[Macro] Idle delay: waiting 2 seconds before movement...")
-                time.sleep(2.0)  # Pause all keypresses for 2 seconds
+            # Jittering key press interval (±8% of interval, max ±100ms) to remove uniform rhythm
+            if humanizer_enabled and interval_ms > 50:
+                jitter_range = min(100, int(interval_ms * 0.08))
+                actual_interval = (interval_ms + random.randint(-jitter_range, jitter_range)) / 1000.0
+            else:
+                actual_interval = interval_ms / 1000.0
                 
-                print("[Macro] Executing 1m movement routine: Right x4, Left x4...")
-                # Resolve keycodes depending on OS (mac vs win)
+            # Check macro timer
+            current_time = time.time()
+            if macro_enabled and (current_time - last_macro_time >= next_macro_delay):
+                # Idle pause (randomized between 1.7s and 2.5s if humanizer active, else 2s)
+                idle_delay = random.uniform(1.7, 2.5) if humanizer_enabled else 2.0
+                print(f"[Macro] Idle delay: pausing {idle_delay:.2f} seconds before movement...")
+                time.sleep(idle_delay)
+                
                 left_kc = 123 if IS_MAC else 0x25
                 right_kc = 124 if IS_MAC else 0x27
                 
-                # Right Arrow 4 times
-                for _ in range(4):
-                    send_keypress(right_kc)
-                    time.sleep(0.18)
-                
-                # Left Arrow 4 times
-                for _ in range(4):
-                    send_keypress(left_kc)
-                    time.sleep(0.18)
-                
+                if humanizer_enabled:
+                    # Randomized direction order (Right->Left or Left->Right)
+                    directions = [(right_kc, "Right"), (left_kc, "Left")]
+                    if random.choice([True, False]):
+                        directions = [(left_kc, "Left"), (right_kc, "Right")]
+                        
+                    # Randomized steps (3 to 6 steps per direction, slightly uneven to look natural)
+                    steps_first = random.randint(3, 6)
+                    steps_second = random.randint(3, 6)
+                    
+                    print(f"[Macro] Executing humanized movement: {directions[0][1]} x{steps_first}, {directions[1][1]} x{steps_second}...")
+                    
+                    # 1st Direction movement
+                    for _ in range(steps_first):
+                        send_keypress(directions[0][0])
+                        time.sleep(random.uniform(0.14, 0.22))
+                        
+                    # Brief stop between switching directions (200ms ~ 500ms)
+                    time.sleep(random.uniform(0.2, 0.5))
+                    
+                    # 2nd Direction movement
+                    for _ in range(steps_second):
+                        send_keypress(directions[1][0])
+                        time.sleep(random.uniform(0.14, 0.22))
+                    
+                    # Next macro delay gets randomized (between 50 and 70 seconds)
+                    next_macro_delay = random.uniform(50.0, 70.0)
+                else:
+                    # Uniform mode: Right x4, Left x4
+                    print("[Macro] Executing uniform movement: Right x4, Left x4...")
+                    for _ in range(4):
+                        send_keypress(right_kc)
+                        time.sleep(0.18)
+                    for _ in range(4):
+                        send_keypress(left_kc)
+                        time.sleep(0.18)
+                    next_macro_delay = 60.0
+                    
                 last_macro_time = time.time()
             
+            # Send continuous key
             send_keypress(keycode)
             with state_lock:
                 state["count"] += 1
-            
+                
             # Smart interruptible sleep
             sleep_event.clear()
-            sleep_event.wait(timeout=interval)
+            sleep_event.wait(timeout=actual_interval)
         else:
-            # Reset timer when stopped to delay the first macro trigger by 30 seconds after start
+            # Reset timer when stopped
             last_macro_time = time.time()
-            # Short sleep when idle to prevent high CPU utilization
+            next_macro_delay = random.uniform(50.0, 70.0) if humanizer_enabled else 60.0
             time.sleep(0.1)
 
 def load_config():
@@ -277,9 +322,10 @@ def load_config():
                     state["key_name"] = data.get("key_name", "Space")
                     state["interval_ms"] = data.get("interval_ms", 1000)
                     state["macro_enabled"] = data.get("macro_enabled", False)
-                    # Resolve OS specific keycode on load
+                    state["humanizer_enabled"] = data.get("humanizer_enabled", True)
+                    # Resolve keycode on load
                     state["keycode"] = resolve_keycode(state["key_code_str"])
-            print(f"[Config] Loaded: Key={state['key_name']} (OS Code {state['keycode']}), Interval={state['interval_ms']}ms, Macro={state['macro_enabled']}")
+            print(f"[Config] Loaded: Key={state['key_name']} (OS Code {state['keycode']}), Interval={state['interval_ms']}ms, Macro={state['macro_enabled']}, Humanizer={state['humanizer_enabled']}")
         except Exception as e:
             print(f"[Config] Error loading configuration: {e}")
 
@@ -290,7 +336,8 @@ def save_config():
             "key_code_str": state["key_code_str"],
             "key_name": state["key_name"],
             "interval_ms": state["interval_ms"],
-            "macro_enabled": state["macro_enabled"]
+            "macro_enabled": state["macro_enabled"],
+            "humanizer_enabled": state["humanizer_enabled"]
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -388,7 +435,6 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                 with state_lock:
                     if "key_code_str" in data:
                         state["key_code_str"] = str(data["key_code_str"])
-                        # Dynamically resolve OS keycode on update
                         state["keycode"] = resolve_keycode(state["key_code_str"])
                     if "key_name" in data:
                         state["key_name"] = str(data["key_name"])
@@ -396,9 +442,11 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                         state["interval_ms"] = max(10, int(data["interval_ms"]))
                     if "macro_enabled" in data:
                         state["macro_enabled"] = bool(data["macro_enabled"])
+                    if "humanizer_enabled" in data:
+                        state["humanizer_enabled"] = bool(data["humanizer_enabled"])
                 save_config()
                 sleep_event.set()  # Apply changes immediately
-                print(f"[Control] Config updated: Key={state['key_name']} (OS Code {state['keycode']}), Interval={state['interval_ms']}ms, Macro={state['macro_enabled']}")
+                print(f"[Control] Config updated: Key={state['key_name']} (OS Code {state['keycode']}), Interval={state['interval_ms']}ms, Macro={state['macro_enabled']}, Humanizer={state['humanizer_enabled']}")
             except Exception as e:
                 response_data = {"success": False, "error": str(e)}
         else:

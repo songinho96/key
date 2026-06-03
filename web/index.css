@@ -793,3 +793,39 @@ input:checked + .switch-slider:before {
     background-color: var(--color-cyan);
     box-shadow: 0 0 8px var(--color-cyan);
 }
+
+/* Anti-Detection Humanizer Switch & Badge Styles */
+.humanizer-group {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 20px;
+    margin-top: 8px;
+}
+
+.humanizer-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--card-border);
+    padding: 2px 8px;
+    border-radius: 6px;
+    transition: var(--transition-smooth);
+}
+
+.humanizer-badge.active {
+    color: var(--color-purple);
+    border-color: rgba(155, 81, 224, 0.3);
+    background: rgba(155, 81, 224, 0.06);
+    box-shadow: 0 0 8px rgba(155, 81, 224, 0.15);
+}
+
+input:checked + .switch-slider.purple {
+    background-color: rgba(155, 81, 224, 0.2);
+    border-color: var(--color-purple);
+}
+
+input:checked + .switch-slider.purple:before {
+    transform: translateX(20px);
+    background-color: var(--color-purple);
+    box-shadow: 0 0 8px var(--color-purple);
+}
