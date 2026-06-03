@@ -190,18 +190,25 @@
                     <div class="pixel-config-container" id="jumpConfigContainer" style="display: none;">
                         <div class="pixel-row">
                             <div class="pixel-field">
-                                <label for="jumpDirection">이동 방향</label>
-                                <select id="jumpDirection" class="select-input">
-                                    <option value="right">오른쪽 (->)</option>
-                                    <option value="left">왼쪽 (<-)</option>
-                                </select>
+                                <label for="jumpXInput">목표 X 좌표 (미니맵)</label>
+                                <div class="input-container-small">
+                                    <input type="number" id="jumpXInput" min="0" max="2000" value="100">
+                                    <span class="input-unit-small">px</span>
+                                </div>
                             </div>
                             <div class="pixel-field">
-                                <label for="jumpMoveDurationInput">이동 시간(초)</label>
+                                <label for="jumpYInput">목표 Y 좌표 (미니맵)</label>
                                 <div class="input-container-small">
-                                    <input type="number" id="jumpMoveDurationInput" min="0.1" step="0.1" value="3.0">
-                                    <span class="input-unit-small">초</span>
+                                    <input type="number" id="jumpYInput" min="0" max="2000" value="100">
+                                    <span class="input-unit-small">px</span>
                                 </div>
+                            </div>
+                        </div>
+                        <div class="pixel-row" style="margin-top: 8px;">
+                            <div class="pixel-field-full">
+                                <button type="button" class="btn btn-secondary btn-xs picker-btn" id="btnPickJumpPos" style="width: 100%; height: 32px; font-weight: 600;">
+                                    🎯 이동할 좌표 가져오기 (3초 대기)
+                                </button>
                             </div>
                         </div>
                         

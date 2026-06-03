@@ -38,8 +38,8 @@ state = {
     
     # Move & Jump Macro State
     "jump_macro_enabled": False,
-    "jump_move_direction": "right",
-    "jump_move_duration_s": 3.0,
+    "jump_x": 100,
+    "jump_y": 100,
     "jump_cooldown_s": 20.0,
     "jump_action_code_str": "KeyC",
     "jump_action_keycode": 8 if IS_MAC else 0x43,
@@ -150,6 +150,10 @@ if IS_MAC:
         cf.CFDataGetBytePtr.argtypes = [ctypes.c_void_p]
         cg.CGImageGetBytesPerRow.restype = ctypes.c_size_t
         cg.CGImageGetBytesPerRow.argtypes = [ctypes.c_void_p]
+        cg.CGDisplayPixelsWide.restype = ctypes.c_size_t
+        cg.CGDisplayPixelsWide.argtypes = [ctypes.c_uint32]
+        cg.CGDisplayBounds.restype = CGRect
+        cg.CGDisplayBounds.argtypes = [ctypes.c_uint32]
         
         # Warp Mouse API
         cg.CGWarpMouseCursorPosition.restype = None
@@ -372,8 +376,36 @@ def set_mouse_pos(x, y):
         except Exception as e:
             print(f"Error warp mouse Windows: {e}")
 
-def find_character_yellow_dot(search_width=400, search_height=400):
-    """Scans the top-left area (minimap region) for the character's yellow dot pixel"""
+def get_screen_scale():
+    """Calculates the host screen scale factor (Retina/DPI Scaling)"""
+    if IS_MAC and cg_loaded:
+        try:
+            display_id = cg.CGMainDisplayID()
+            bounds = cg.CGDisplayBounds(display_id)
+            points_wide = bounds.size.width
+            pixels_wide = cg.CGDisplayPixelsWide(display_id)
+            if points_wide > 0:
+                return float(pixels_wide) / float(points_wide)
+        except Exception as e:
+            print(f"Error calculating macOS screen scale: {e}")
+    elif IS_WINDOWS and user32 is not None:
+        try:
+            hdc = user32.GetDC(0)
+            logpixelsy = ctypes.windll.gdi32.GetDeviceCaps(hdc, 90) # LOGPIXELSY
+            user32.ReleaseDC(0, hdc)
+            return float(logpixelsy) / 96.0
+        except Exception as e:
+            pass
+    return 1.0
+
+def find_character_yellow_dot():
+    """Scans the top-left area (minimap region) for the character's yellow dot pixel and returns its logical coordinates (centroid of all matching pixels)"""
+    scale = get_screen_scale()
+    
+    # Scale search area based on screen DPI scale to cover the actual minimap (approx 400 logical points wide)
+    search_width = int(400 * scale)
+    search_height = int(400 * scale)
+    
     if IS_MAC and cg_loaded:
         try:
             display_id = cg.CGMainDisplayID()
@@ -387,9 +419,10 @@ def find_character_yellow_dot(search_width=400, search_height=400):
                     bytes_per_row = cg.CGImageGetBytesPerRow(image)
                     char_ptr = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_ubyte))
                     
-                    # Search step by 2 pixels for speed
-                    for y in range(0, search_height, 2):
-                        for x in range(0, search_width, 2):
+                    yellow_pixels = []
+                    # Scan every 1 pixel for exact centroid calculation
+                    for y in range(0, search_height):
+                        for x in range(0, search_width):
                             offset = y * bytes_per_row + x * 4
                             b = char_ptr[offset]
                             g = char_ptr[offset+1]
@@ -397,11 +430,16 @@ def find_character_yellow_dot(search_width=400, search_height=400):
                             
                             # Yellow character dot threshold (R>=240, G>=200, B<=40)
                             if r >= 240 and g >= 200 and b <= 40:
-                                cf.CFRelease(data)
-                                cf.CFRelease(image)
-                                return x, y
+                                yellow_pixels.append((x, y))
+                                
                     cf.CFRelease(data)
-                cf.CFRelease(image)
+                    cf.CFRelease(image)
+                    
+                    if yellow_pixels:
+                        avg_x = sum(p[0] for p in yellow_pixels) / len(yellow_pixels)
+                        avg_y = sum(p[1] for p in yellow_pixels) / len(yellow_pixels)
+                        # Convert to logical coordinate
+                        return int(avg_x / scale), int(avg_y / scale)
         except Exception as e:
             print(f"Error scanning yellow dot macOS: {e}")
             
@@ -444,15 +482,22 @@ def find_character_yellow_dot(search_width=400, search_height=400):
             ctypes.windll.gdi32.DeleteDC(hdc_mem)
             user32.ReleaseDC(0, hdc_screen)
             
-            for y in range(0, search_height, 2):
-                for x in range(0, search_width, 2):
+            yellow_pixels = []
+            for y in range(0, search_height):
+                for x in range(0, search_width):
                     offset = (y * search_width + x) * 4
                     b = buffer[offset]
                     g = buffer[offset+1]
                     r = buffer[offset+2]
                     
                     if r >= 240 and g >= 200 and b <= 40:
-                        return x, y
+                        yellow_pixels.append((x, y))
+                        
+            if yellow_pixels:
+                avg_x = sum(p[0] for p in yellow_pixels) / len(yellow_pixels)
+                avg_y = sum(p[1] for p in yellow_pixels) / len(yellow_pixels)
+                # Convert to logical coordinate
+                return int(avg_x / scale), int(avg_y / scale)
         except Exception as e:
             print(f"Error scanning yellow dot Windows: {e}")
             
@@ -607,7 +652,7 @@ def pixel_trigger_thread_func():
         time.sleep(0.1)
 
 def jump_trigger_thread_func():
-    """Background thread executing the Move & Jump & Climb macro using walking duration"""
+    """Background thread executing the Move & Jump & Climb macro with Minimap yellow dot navigation"""
     global state
     last_trigger_time = 0
     
@@ -621,8 +666,8 @@ def jump_trigger_thread_func():
         with state_lock:
             running = state["running"]
             jump_macro_enabled = state["jump_macro_enabled"]
-            jump_move_direction = state["jump_move_direction"]
-            jump_move_duration_s = state["jump_move_duration_s"]
+            jump_x = state["jump_x"] # Target X on Minimap (logical coordinates)
+            jump_y = state["jump_y"] # Target Y on Minimap (logical coordinates)
             jump_cooldown_s = state["jump_cooldown_s"]
             jump_action_keycode = state["jump_action_keycode"]
             jump_action_name = state["jump_action_name"]
@@ -638,47 +683,113 @@ def jump_trigger_thread_func():
                 actual_cooldown += random.uniform(-jitter, jitter)
                 
             if current_time - last_trigger_time >= actual_cooldown:
-                print(f"[Move & Climb Macro] Starting walk {jump_move_direction} for {jump_move_duration_s}s...")
+                print(f"[Navigate Macro] Commencing movement towards target X: {jump_x} on minimap...")
                 
-                # 1. Walk in the specified direction
-                walk_key = right_kc if jump_move_direction == "right" else left_kc
+                # 1. Navigation loop
+                start_nav_time = time.time()
+                nav_timeout = 12.0  # 12 seconds max to reach target
+                reached = False
+                last_dir = None
                 
-                # Apply humanizer to walking duration (±8%)
-                actual_walk_duration = jump_move_duration_s
-                if humanizer_enabled and jump_move_duration_s > 0.5:
-                    actual_walk_duration += random.uniform(-jump_move_duration_s * 0.08, jump_move_duration_s * 0.08)
-                
-                # Press walk key
-                send_key_down(walk_key)
-                time.sleep(actual_walk_duration)
-                send_key_up(walk_key)
-                
-                # Brief stop (100ms ~ 250ms)
-                time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
-                
-                # 2. Press Jump Key (e.g. C) to grab
-                send_keypress(jump_action_keycode)
-                
-                # Brief delay before climbing (80ms ~ 150ms)
-                time.sleep(random.uniform(0.08, 0.15) if humanizer_enabled else 0.1)
-                
-                # 3. Climb Up (Hold ArrowUp for 2 seconds)
-                hold_up_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
-                print(f"[Move & Climb Macro] Holding ArrowUp for {hold_up_duration:.2f} seconds...")
-                send_key_down(up_kc)
-                time.sleep(hold_up_duration)
-                send_key_up(up_kc)
-                
-                # Brief stop (100ms ~ 250ms)
-                time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
-                
-                # 4. Climb Down (Hold ArrowDown for 2 seconds)
-                hold_down_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
-                print(f"[Move & Climb Macro] Holding ArrowDown for {hold_down_duration:.2f} seconds...")
-                send_key_down(down_kc)
-                time.sleep(hold_down_duration)
-                send_key_up(down_kc)
-                
+                while running and (time.time() - start_nav_time < nav_timeout):
+                    # Live check of running state
+                    with state_lock:
+                        running = state["running"]
+                        if not running:
+                            break
+                            
+                    pos = find_character_yellow_dot()
+                    if pos is None:
+                        # If character is not found, temporarily stop movement
+                        if last_dir:
+                            send_key_up(last_dir)
+                            last_dir = None
+                        time.sleep(0.1)
+                        continue
+                        
+                    curr_x, curr_y = pos
+                    diff_x = curr_x - jump_x # + means character is to the right of target -> must move left
+                                             # - means character is to the left of target -> must move right
+                                             
+                    tolerance = 1 # X-axis tolerance tightened to 1 pixel for exact rope alignment
+                    
+                    if abs(diff_x) <= tolerance:
+                        reached = True
+                        break
+                        
+                    if abs(diff_x) > 5:
+                        # High distance: hold arrow keys down for normal running speed
+                        if diff_x < 0:
+                            # Move Right
+                            if last_dir == left_kc:
+                                send_key_up(left_kc)
+                            if last_dir != right_kc:
+                                send_key_down(right_kc)
+                                last_dir = right_kc
+                        else:
+                            # Move Left
+                            if last_dir == right_kc:
+                                send_key_up(right_kc)
+                            if last_dir != left_kc:
+                                send_key_down(left_kc)
+                                last_dir = left_kc
+                        time.sleep(0.05) # Scan minimap at 20Hz
+                    else:
+                        # Close distance (<= 5px): micro-stepping adjustments
+                        if last_dir:
+                            send_key_up(last_dir)
+                            last_dir = None
+                            time.sleep(0.15) # Wait brief moment to absorb slide inertia
+                            
+                        # Perform micro-tap
+                        tap_key = right_kc if diff_x < 0 else left_kc
+                        send_key_down(tap_key)
+                        
+                        # Dynamically scale tap duration based on distance
+                        tap_duration = 0.035 if abs(diff_x) <= 2 else 0.06
+                        time.sleep(tap_duration)
+                        send_key_up(tap_key)
+                        
+                        # Wait for position updates to settle on minimap
+                        time.sleep(0.2)
+                    
+                # Stop walking
+                if last_dir:
+                    send_key_up(last_dir)
+                    
+                # Proceed with jump climb if reached or timed out but active
+                if reached or (running and not reached):
+                    if not reached:
+                        print("[Navigate Macro] Navigation timed out. Attempting grab/jump sequence anyway.")
+                    else:
+                        print("[Navigate Macro] Arrived at target X coordinate. Launching jump grab...")
+                        
+                    # Brief stop (100ms ~ 250ms)
+                    time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
+                    
+                    # Press Jump Key
+                    send_keypress(jump_action_keycode)
+                    
+                    # Brief delay before climbing (80ms ~ 150ms)
+                    time.sleep(random.uniform(0.08, 0.15) if humanizer_enabled else 0.1)
+                    
+                    # Climb Up (Hold ArrowUp for 2 seconds)
+                    hold_up_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
+                    print(f"[Navigate Macro] Holding ArrowUp for {hold_up_duration:.2f} seconds...")
+                    send_key_down(up_kc)
+                    time.sleep(hold_up_duration)
+                    send_key_up(up_kc)
+                    
+                    # Brief stop (100ms ~ 250ms)
+                    time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
+                    
+                    # Climb Down (Hold ArrowDown for 2 seconds)
+                    hold_down_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
+                    print(f"[Navigate Macro] Holding ArrowDown for {hold_down_duration:.2f} seconds...")
+                    send_key_down(down_kc)
+                    time.sleep(hold_down_duration)
+                    send_key_up(down_kc)
+                    
                 last_trigger_time = time.time()
                 
         time.sleep(0.1)
@@ -709,8 +820,8 @@ def load_config():
                     
                     # Jump Macro Config
                     state["jump_macro_enabled"] = data.get("jump_macro_enabled", False)
-                    state["jump_move_direction"] = data.get("jump_move_direction", "right")
-                    state["jump_move_duration_s"] = data.get("jump_move_duration_s", 3.0)
+                    state["jump_x"] = data.get("jump_x", 100)
+                    state["jump_y"] = data.get("jump_y", 100)
                     state["jump_cooldown_s"] = data.get("jump_cooldown_s", 20.0)
                     state["jump_action_code_str"] = data.get("jump_action_code_str", "KeyC")
                     state["jump_action_name"] = data.get("jump_action_name", "C")
@@ -745,8 +856,8 @@ def save_config():
             
             # Jump Macro Config
             "jump_macro_enabled": state["jump_macro_enabled"],
-            "jump_move_direction": state["jump_move_direction"],
-            "jump_move_duration_s": state["jump_move_duration_s"],
+            "jump_x": state["jump_x"],
+            "jump_y": state["jump_y"],
             "jump_cooldown_s": state["jump_cooldown_s"],
             "jump_action_code_str": state["jump_action_code_str"],
             "jump_action_name": state["jump_action_name"]
@@ -890,10 +1001,10 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                     # Parse Jump macro configurations
                     if "jump_macro_enabled" in data:
                         state["jump_macro_enabled"] = bool(data["jump_macro_enabled"])
-                    if "jump_move_direction" in data:
-                        state["jump_move_direction"] = str(data["jump_move_direction"])
-                    if "jump_move_duration_s" in data:
-                        state["jump_move_duration_s"] = max(0.1, float(data["jump_move_duration_s"]))
+                    if "jump_x" in data:
+                        state["jump_x"] = int(data["jump_x"])
+                    if "jump_y" in data:
+                        state["jump_y"] = int(data["jump_y"])
                     if "jump_cooldown_s" in data:
                         state["jump_cooldown_s"] = max(0.5, float(data["jump_cooldown_s"]))
                     if "jump_action_code_str" in data:
