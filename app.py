@@ -7,6 +7,7 @@ import threading
 import webbrowser
 import platform
 import random
+import struct
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Detect OS
@@ -397,6 +398,102 @@ def get_screen_scale():
         except Exception as e:
             pass
     return 1.0
+
+def pack_rgb_to_bmp(width, height, raw_bgra):
+    """Packs raw BGRA pixel data into a standard 32-bit BMP bytearray directly (no external dependencies)"""
+    pixel_data_size = width * height * 4
+    file_size = 54 + pixel_data_size
+    
+    # BMP File Header (14 bytes): Magic, FileSize, Reserved1, Reserved2, Offset
+    file_header = struct.pack("<2sIHHI", b"BM", file_size, 0, 0, 54)
+    
+    # BMP Info Header (40 bytes - BITMAPINFOHEADER): HeaderSize, Width, Height, Planes, BPP, Compression, ImageSize, Xppm, Yppm, Colors, ImportantColors
+    # Use negative height for a top-down DIB layout
+    info_header = struct.pack("<IiiHHIIiiII", 40, width, -height, 1, 32, 0, pixel_data_size, 2835, 2835, 0, 0)
+    
+    return file_header + info_header + raw_bgra
+
+def capture_minimap_as_bmp():
+    """Captures the top-left minimap region (400x400 logical points) and encodes it as BMP bytes without external libraries"""
+    scale = get_screen_scale()
+    search_width = int(400 * scale)
+    search_height = int(400 * scale)
+    
+    if IS_MAC and cg_loaded:
+        try:
+            display_id = cg.CGMainDisplayID()
+            rect = CGRect(CGPoint(0, 0), CGSize(search_width, search_height))
+            image = cg.CGDisplayCreateImageForRect(display_id, rect)
+            if image:
+                provider = cg.CGImageGetDataProvider(image)
+                data = cg.CGDataProviderCopyData(provider)
+                if data:
+                    ptr = cf.CFDataGetBytePtr(data)
+                    bytes_per_row = cg.CGImageGetBytesPerRow(image)
+                    char_ptr = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_ubyte))
+                    
+                    clean_bgra = bytearray(search_width * search_height * 4)
+                    
+                    # Copy row by row to strip out row-padding bytes
+                    for y in range(search_height):
+                        src_offset = y * bytes_per_row
+                        dest_offset = y * search_width * 4
+                        ctypes.memmove(
+                            (ctypes.c_char * (search_width * 4)).from_buffer(clean_bgra, dest_offset),
+                            ctypes.byref(char_ptr, src_offset),
+                            search_width * 4
+                        )
+                        
+                    cf.CFRelease(data)
+                    cf.CFRelease(image)
+                    return pack_rgb_to_bmp(search_width, search_height, clean_bgra)
+        except Exception as e:
+            print(f"Error capturing minimap macOS: {e}")
+            
+    elif IS_WINDOWS and user32 is not None:
+        try:
+            hdc_screen = user32.GetDC(0)
+            hdc_mem = ctypes.windll.gdi32.CreateCompatibleDC(hdc_screen)
+            h_bitmap = ctypes.windll.gdi32.CreateCompatibleBitmap(hdc_screen, search_width, search_height)
+            h_old = ctypes.windll.gdi32.SelectObject(hdc_mem, h_bitmap)
+            
+            # SRCCOPY BitBlt
+            ctypes.windll.gdi32.BitBlt(hdc_mem, 0, 0, search_width, search_height, hdc_screen, 0, 0, 0x00CC0020)
+            
+            class BITMAPINFOHEADER(ctypes.Structure):
+                _fields_ = [
+                    ("biSize", ctypes.c_ulong), ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
+                    ("biPlanes", ctypes.c_ushort), ("biBitCount", ctypes.c_ushort), ("biCompression", ctypes.c_ulong),
+                    ("biSizeImage", ctypes.c_ulong), ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long),
+                    ("biClrUsed", ctypes.c_ulong), ("biClrImportant", ctypes.c_ulong)
+                ]
+            class BITMAPINFO(ctypes.Structure):
+                _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", ctypes.c_ulong * 3)]
+                
+            bmi = BITMAPINFO()
+            bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bmi.bmiHeader.biWidth = search_width
+            bmi.bmiHeader.biHeight = -search_height # Top-down DIB
+            bmi.bmiHeader.biPlanes = 1
+            bmi.bmiHeader.biBitCount = 32
+            bmi.bmiHeader.biCompression = 0
+            
+            buffer_size = search_width * search_height * 4
+            buffer = (ctypes.c_ubyte * buffer_size)()
+            
+            ctypes.windll.gdi32.GetDIBits(hdc_screen, h_bitmap, 0, search_height, ctypes.byref(buffer), ctypes.byref(bmi), 0)
+            
+            # GDI cleanup
+            ctypes.windll.gdi32.SelectObject(hdc_mem, h_old)
+            ctypes.windll.gdi32.DeleteObject(h_bitmap)
+            ctypes.windll.gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(0, hdc_screen)
+            
+            return pack_rgb_to_bmp(search_width, search_height, bytearray(buffer))
+        except Exception as e:
+            print(f"Error capturing minimap Windows: {e}")
+            
+    return None
 
 def find_character_yellow_dot():
     """Scans the top-left area (minimap region) for the character's yellow dot pixel and returns its logical coordinates (centroid of all matching pixels)"""
@@ -901,6 +998,22 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
             res = json.dumps({"x": x, "y": y, "color": color})
             self.wfile.write(res.encode("utf-8"))
             
+        elif self.path.startswith("/api/capture_minimap"):
+            # Capture minimap area as standard 32-bit BMP
+            bmp_data = capture_minimap_as_bmp()
+            if bmp_data:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/bmp")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(bmp_data)))
+                self.end_headers()
+                self.wfile.write(bmp_data)
+            else:
+                self.send_response(500)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(b"Failed to capture screen")
+                
         else:
             # Server static files
             clean_path = self.path.split("?")[0].lstrip("/")

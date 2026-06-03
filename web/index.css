@@ -1066,3 +1066,74 @@ input:checked + .switch-slider.amber:before {
     background-color: var(--color-amber);
     box-shadow: 0 0 8px var(--color-amber);
 }
+
+/* Minimap Viewer Styling */
+#minimapViewer {
+    width: 400px;
+    height: 400px;
+    position: relative;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 2px dashed rgba(255, 255, 255, 0.15);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: crosshair;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+}
+
+#minimapViewer:hover {
+    border-color: var(--color-amber);
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.6), 0 0 15px rgba(245, 158, 11, 0.15);
+}
+
+#minimapImage {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.minimap-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    padding: 20px;
+    text-align: center;
+    gap: 4px;
+}
+
+.minimap-placeholder svg {
+    stroke: rgba(255, 255, 255, 0.2);
+    margin-bottom: 12px;
+    animation: pulse 2s infinite ease-in-out;
+}
+
+#minimapMarker {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: #ef4444;
+    border: 2.5px solid #ffffff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.8), 0 0 0 4px rgba(239, 68, 68, 0.25);
+    animation: markerPulse 1.5s infinite cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes markerPulse {
+    0% {
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.8), 0 0 0 0px rgba(239, 68, 68, 0.4);
+    }
+    100% {
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.8), 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+}

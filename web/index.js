@@ -70,7 +70,11 @@ const jumpBadge = document.getElementById("jumpBadge");
 const jumpConfigContainer = document.getElementById("jumpConfigContainer");
 const jumpXInput = document.getElementById("jumpXInput");
 const jumpYInput = document.getElementById("jumpYInput");
-const btnPickJumpPos = document.getElementById("btnPickJumpPos");
+const btnCaptureMinimap = document.getElementById("btnCaptureMinimap");
+const minimapViewer = document.getElementById("minimapViewer");
+const minimapImage = document.getElementById("minimapImage");
+const minimapPlaceholder = document.getElementById("minimapPlaceholder");
+const minimapMarker = document.getElementById("minimapMarker");
 const jumpKeyCapDisplay = document.getElementById("jumpKeyCapDisplay");
 const btnRecordJumpKey = document.getElementById("btnRecordJumpKey");
 const jumpCooldownInput = document.getElementById("jumpCooldownInput");
@@ -159,7 +163,8 @@ document.addEventListener("DOMContentLoaded", () => {
     jumpToggle.addEventListener("change", handleJumpToggleChange);
     jumpXInput.addEventListener("change", handleJumpXChange);
     jumpYInput.addEventListener("change", handleJumpYChange);
-    btnPickJumpPos.addEventListener("click", startJumpPicking);
+    btnCaptureMinimap.addEventListener("click", captureMinimap);
+    minimapViewer.addEventListener("click", handleMinimapClick);
     btnRecordJumpKey.addEventListener("click", () => startKeyRecording("jump"));
     jumpCooldownInput.addEventListener("change", handleJumpCooldownChange);
     
@@ -287,6 +292,7 @@ function updateUI() {
     jumpYInput.value = appState.jump_y;
     jumpKeyCapDisplay.textContent = appState.jump_action_name;
     jumpCooldownInput.value = appState.jump_cooldown_s;
+    updateMinimapMarkerPosition();
     
     updateUIStateOnly();
 }
@@ -672,16 +678,20 @@ function handleJumpToggleChange(e) {
 function handleJumpXChange(e) {
     let val = parseInt(e.target.value);
     if (isNaN(val) || val < 0) val = 0;
+    if (val > 400) val = 400;
     e.target.value = val;
     appState.jump_x = val;
+    updateMinimapMarkerPosition();
     saveConfigToServer();
 }
 
 function handleJumpYChange(e) {
     let val = parseInt(e.target.value);
     if (isNaN(val) || val < 0) val = 0;
+    if (val > 400) val = 400;
     e.target.value = val;
     appState.jump_y = val;
+    updateMinimapMarkerPosition();
     saveConfigToServer();
 }
 
@@ -693,40 +703,59 @@ function handleJumpCooldownChange(e) {
     saveConfigToServer();
 }
 
-function startJumpPicking() {
-    pickerOverlay.classList.add("active");
-    let timeLeft = 3;
-    pickerCountdown.textContent = timeLeft;
+function captureMinimap() {
+    btnCaptureMinimap.textContent = "📸 로딩 중...";
+    btnCaptureMinimap.disabled = true;
     
-    const interval = setInterval(() => {
-        timeLeft--;
-        if (timeLeft > 0) {
-            pickerCountdown.textContent = timeLeft;
-        } else {
-            clearInterval(interval);
-            // Trigger pick API
-            fetch("/api/pick")
-                .then(res => {
-                    if (!res.ok) throw new Error("Pick request failed");
-                    return res.json();
-                })
-                .then(data => {
-                    jumpXInput.value = data.x;
-                    jumpYInput.value = data.y;
-                    
-                    appState.jump_x = data.x;
-                    appState.jump_y = data.y;
-                    
-                    saveConfigToServer();
-                })
-                .catch(err => {
-                    console.error("Error picking jump coordinates:", err);
-                })
-                .finally(() => {
-                    pickerOverlay.classList.remove("active");
-                });
-        }
-    }, 1000);
+    // Append timestamp to bust browser image cache
+    minimapImage.src = "/api/capture_minimap?t=" + Date.now();
+    
+    minimapImage.onload = function() {
+        minimapImage.style.display = "block";
+        minimapPlaceholder.style.display = "none";
+        minimapMarker.style.display = "block";
+        btnCaptureMinimap.textContent = "📸 현재 게임 미니맵 화면 가져오기";
+        btnCaptureMinimap.disabled = false;
+        updateMinimapMarkerPosition();
+    };
+    
+    minimapImage.onerror = function() {
+        alert("게임 미니맵 화면을 가져오는 데 실패했습니다. 게임이 실행 중이며 활성화되어 있는지 확인해 주세요.");
+        btnCaptureMinimap.textContent = "📸 현재 게임 미니맵 화면 가져오기";
+        btnCaptureMinimap.disabled = false;
+    };
+}
+
+function handleMinimapClick(e) {
+    // Only capture click if the image has been loaded
+    if (minimapImage.style.display === "none") return;
+    
+    const rect = minimapViewer.getBoundingClientRect();
+    const x = Math.round(e.clientX - rect.left);
+    const y = Math.round(e.clientY - rect.top);
+    
+    // Bounds check
+    const clampedX = Math.max(0, Math.min(400, x));
+    const clampedY = Math.max(0, Math.min(400, y));
+    
+    appState.jump_x = clampedX;
+    appState.jump_y = clampedY;
+    
+    jumpXInput.value = clampedX;
+    jumpYInput.value = clampedY;
+    
+    updateMinimapMarkerPosition();
+    saveConfigToServer();
+}
+
+function updateMinimapMarkerPosition() {
+    if (appState.jump_x !== undefined && appState.jump_y !== undefined) {
+        minimapMarker.style.left = appState.jump_x + "px";
+        minimapMarker.style.top = appState.jump_y + "px";
+        
+        // Show marker if there's coordinate config
+        minimapMarker.style.display = "block";
+    }
 }
 
 function updateJumpBadge() {
