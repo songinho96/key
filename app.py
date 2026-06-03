@@ -24,6 +24,8 @@ state = {
     "interval_ms": 1000,
     "count": 0,
     "macro_enabled": False,
+    "macro_interval_s": 60.0,
+    "macro_move_duration_s": 3.0,
     "humanizer_enabled": True,  # Anti-Detection (Humanizer) Mode
     "macos_accessible": True,   # macOS Accessibility privilege status
     
@@ -720,6 +722,7 @@ def presser_thread_func():
     
     last_macro_time = time.time()
     next_macro_delay = 60.0  # Dynamic macro delay target (randomized if humanizer is active)
+    macro_next_dir_right = True
     
     while True:
         with state_lock:
@@ -748,44 +751,36 @@ def presser_thread_func():
                 left_kc = 123 if IS_MAC else 0x25
                 right_kc = 124 if IS_MAC else 0x27
                 
-                if humanizer_enabled:
-                    # Randomized direction order (Right->Left or Left->Right)
-                    directions = [(right_kc, "Right"), (left_kc, "Left")]
-                    if random.choice([True, False]):
-                        directions = [(left_kc, "Left"), (right_kc, "Right")]
-                        
-                    # Randomized steps (3 to 6 steps per direction, slightly uneven to look natural)
-                    steps_first = random.randint(3, 6)
-                    steps_second = random.randint(3, 6)
-                    
-                    print(f"[Macro] Executing humanized movement: {directions[0][1]} x{steps_first}, {directions[1][1]} x{steps_second}...")
-                    
-                    # 1st Direction movement
-                    for _ in range(steps_first):
-                        send_keypress(directions[0][0])
-                        time.sleep(random.uniform(0.14, 0.22))
-                        
-                    # Brief stop between switching directions (200ms ~ 500ms)
-                    time.sleep(random.uniform(0.2, 0.5))
-                    
-                    # 2nd Direction movement
-                    for _ in range(steps_second):
-                        send_keypress(directions[1][0])
-                        time.sleep(random.uniform(0.14, 0.22))
-                    
-                    # Next macro delay gets randomized (between 50 and 70 seconds)
-                    next_macro_delay = random.uniform(50.0, 70.0)
+                with state_lock:
+                    base_duration = state.get("macro_move_duration_s", 3.0)
+                    base_interval = state.get("macro_interval_s", 60.0)
+                
+                # Alternate direction
+                dir_kc = right_kc if macro_next_dir_right else left_kc
+                dir_name = "Right" if macro_next_dir_right else "Left"
+                
+                # Apply humanizer jitter to move duration if enabled (±8%)
+                if humanizer_enabled and base_duration > 0.5:
+                    duration_jitter = base_duration * 0.08
+                    actual_duration = base_duration + random.uniform(-duration_jitter, duration_jitter)
                 else:
-                    # Uniform mode: Right x4, Left x4
-                    print("[Macro] Executing uniform movement: Right x4, Left x4...")
-                    for _ in range(4):
-                        send_keypress(right_kc)
-                        time.sleep(0.18)
-                    for _ in range(4):
-                        send_keypress(left_kc)
-                        time.sleep(0.18)
-                    next_macro_delay = 60.0
-                    
+                    actual_duration = base_duration
+                
+                print(f"[Macro] Holding {dir_name} arrow key for {actual_duration:.2f} seconds...")
+                send_key_down(dir_kc)
+                time.sleep(actual_duration)
+                send_key_up(dir_kc)
+                
+                # Alternate next direction
+                macro_next_dir_right = not macro_next_dir_right
+                
+                # Apply humanizer jitter to next macro delay if enabled (±8%)
+                if humanizer_enabled and base_interval > 5.0:
+                    interval_jitter = base_interval * 0.08
+                    next_macro_delay = base_interval + random.uniform(-interval_jitter, interval_jitter)
+                else:
+                    next_macro_delay = base_interval
+                
                 last_macro_time = time.time()
             
             # Send continuous key
@@ -799,7 +794,10 @@ def presser_thread_func():
         else:
             # Reset timer when stopped
             last_macro_time = time.time()
-            next_macro_delay = random.uniform(50.0, 70.0) if humanizer_enabled else 60.0
+            macro_next_dir_right = True
+            with state_lock:
+                base_interval = state.get("macro_interval_s", 60.0)
+            next_macro_delay = base_interval
             time.sleep(0.1)
 
 def pixel_trigger_thread_func():
@@ -1043,6 +1041,8 @@ def load_config():
                     state["key_name"] = data.get("key_name", "Space")
                     state["interval_ms"] = data.get("interval_ms", 1000)
                     state["macro_enabled"] = data.get("macro_enabled", False)
+                    state["macro_interval_s"] = data.get("macro_interval_s", 60.0)
+                    state["macro_move_duration_s"] = data.get("macro_move_duration_s", 3.0)
                     state["humanizer_enabled"] = data.get("humanizer_enabled", True)
                     
                     # Pixel Trigger Config
@@ -1095,6 +1095,8 @@ def save_config():
             "key_name": state["key_name"],
             "interval_ms": state["interval_ms"],
             "macro_enabled": state["macro_enabled"],
+            "macro_interval_s": state["macro_interval_s"],
+            "macro_move_duration_s": state["macro_move_duration_s"],
             "humanizer_enabled": state["humanizer_enabled"],
             
             # Pixel Trigger Config
@@ -1260,6 +1262,10 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                         state["interval_ms"] = max(10, int(data["interval_ms"]))
                     if "macro_enabled" in data:
                         state["macro_enabled"] = bool(data["macro_enabled"])
+                    if "macro_interval_s" in data:
+                        state["macro_interval_s"] = max(1.0, float(data["macro_interval_s"]))
+                    if "macro_move_duration_s" in data:
+                        state["macro_move_duration_s"] = max(0.1, float(data["macro_move_duration_s"]))
                     if "humanizer_enabled" in data:
                         state["humanizer_enabled"] = bool(data["humanizer_enabled"])
                         

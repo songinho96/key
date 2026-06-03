@@ -86,7 +86,7 @@
                 <!-- Anti-Idle Macro Box -->
                 <div class="setting-group macro-group">
                     <div class="setting-label-row">
-                        <label for="macroToggle">1분 이동 매크로</label>
+                        <label for="macroToggle">우/좌 왕복 이동 매크로</label>
                         <span class="macro-badge" id="macroBadge">비활성</span>
                     </div>
                     <div class="macro-toggle-row">
@@ -94,7 +94,23 @@
                             <input type="checkbox" id="macroToggle">
                             <span class="switch-slider"></span>
                         </label>
-                        <span class="macro-toggle-label-text">1분마다 우이동4번 + 좌이동4번 실행</span>
+                        <span class="macro-toggle-label-text">일정 시간 사냥 후 우로 이동, 다음 주기에 좌로 이동하여 사냥터 복귀</span>
+                    </div>
+                    <div class="pixel-row" style="margin-top: 8px; gap: 8px;">
+                        <div class="pixel-field">
+                            <label for="macroIntervalInput">이동 주기 (초)</label>
+                            <div class="input-container-small">
+                                <input type="number" id="macroIntervalInput" min="5" value="60">
+                                <span class="input-unit-small">초</span>
+                            </div>
+                        </div>
+                        <div class="pixel-field">
+                            <label for="macroMoveDurationInput">이동 누름 시간 (초)</label>
+                            <div class="input-container-small">
+                                <input type="number" id="macroMoveDurationInput" min="0.1" step="0.1" value="3.0">
+                                <span class="input-unit-small">초</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

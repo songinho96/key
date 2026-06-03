@@ -107,6 +107,8 @@ let appState = {
     interval_ms: 1000,
     count: 0,
     macro_enabled: false,
+    macro_interval_s: 60.0,
+    macro_move_duration_s: 3.0,
     humanizer_enabled: true,
     macos_accessible: true,
     
@@ -165,6 +167,12 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Macro toggle binding
     macroToggle.addEventListener("change", handleMacroToggleChange);
+    if (document.getElementById("macroIntervalInput")) {
+        document.getElementById("macroIntervalInput").addEventListener("change", handleMacroIntervalChange);
+    }
+    if (document.getElementById("macroMoveDurationInput")) {
+        document.getElementById("macroMoveDurationInput").addEventListener("change", handleMacroMoveDurationChange);
+    }
     
     // Humanizer toggle binding
     humanizerToggle.addEventListener("change", handleHumanizerToggleChange);
@@ -269,6 +277,8 @@ function startPolling() {
                     appState.key_name = newState.key_name;
                     appState.interval_ms = newState.interval_ms;
                     appState.macro_enabled = newState.macro_enabled;
+                    appState.macro_interval_s = newState.macro_interval_s;
+                    appState.macro_move_duration_s = newState.macro_move_duration_s;
                     appState.humanizer_enabled = newState.humanizer_enabled;
                     
                     appState.pixel_macro_enabled = newState.pixel_macro_enabled;
@@ -323,6 +333,12 @@ function updateUI() {
     
     // Update macro toggle state
     updateMacroBadge();
+    if (document.getElementById("macroIntervalInput")) {
+        document.getElementById("macroIntervalInput").value = appState.macro_interval_s;
+    }
+    if (document.getElementById("macroMoveDurationInput")) {
+        document.getElementById("macroMoveDurationInput").value = appState.macro_move_duration_s;
+    }
     updateHumanizerBadge();
     
     // Update pixel macro inputs & elements
@@ -377,6 +393,20 @@ function updateUI() {
 function handleMacroToggleChange(e) {
     appState.macro_enabled = e.target.checked;
     updateMacroBadge();
+    saveConfigToServer();
+}
+
+function handleMacroIntervalChange(e) {
+    let val = parseFloat(e.target.value);
+    if (isNaN(val) || val < 1.0) val = 60.0;
+    appState.macro_interval_s = val;
+    saveConfigToServer();
+}
+
+function handleMacroMoveDurationChange(e) {
+    let val = parseFloat(e.target.value);
+    if (isNaN(val) || val < 0.1) val = 3.0;
+    appState.macro_move_duration_s = val;
     saveConfigToServer();
 }
 
@@ -522,6 +552,8 @@ async function saveConfigToServer() {
                 key_name: appState.key_name,
                 interval_ms: appState.interval_ms,
                 macro_enabled: appState.macro_enabled,
+                macro_interval_s: appState.macro_interval_s,
+                macro_move_duration_s: appState.macro_move_duration_s,
                 humanizer_enabled: appState.humanizer_enabled,
                 
                 // Pixel fields
