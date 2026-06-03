@@ -229,28 +229,26 @@ def presser_thread_func():
             macro_enabled = state["macro_enabled"]
             
         if running:
-            # Check if 30 seconds have passed since last macro run
+            # Check if 60 seconds (1 minute) have passed since last macro run
             current_time = time.time()
-            if macro_enabled and (current_time - last_macro_time >= 30.0):
+            if macro_enabled and (current_time - last_macro_time >= 60.0):
                 print("[Macro] Idle delay: waiting 2 seconds before movement...")
                 time.sleep(2.0)  # Pause all keypresses for 2 seconds
                 
-                print("[Macro] Executing 30s movement routine: Right x2, Left x2...")
+                print("[Macro] Executing 1m movement routine: Right x4, Left x4...")
                 # Resolve keycodes depending on OS (mac vs win)
                 left_kc = 123 if IS_MAC else 0x25
                 right_kc = 124 if IS_MAC else 0x27
                 
-                # Right Arrow twice
-                send_keypress(right_kc)
-                time.sleep(0.18)
-                send_keypress(right_kc)
-                time.sleep(0.18)
+                # Right Arrow 4 times
+                for _ in range(4):
+                    send_keypress(right_kc)
+                    time.sleep(0.18)
                 
-                # Left Arrow twice
-                send_keypress(left_kc)
-                time.sleep(0.18)
-                send_keypress(left_kc)
-                time.sleep(0.18)
+                # Left Arrow 4 times
+                for _ in range(4):
+                    send_keypress(left_kc)
+                    time.sleep(0.18)
                 
                 last_macro_time = time.time()
             
