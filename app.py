@@ -12,6 +12,15 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 IS_MAC = platform.system() == "Darwin"
 IS_WINDOWS = platform.system() == "Windows"
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
 # Configuration and State
 CONFIG_FILE = "config.json"
 state = {
@@ -302,13 +311,13 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
             # Server static files
             clean_path = self.path.split("?")[0].lstrip("/")
             if not clean_path or clean_path == "index.html":
-                filepath = os.path.join("web", "index.html")
+                filepath = resource_path(os.path.join("web", "index.html"))
             else:
-                filepath = os.path.join("web", clean_path)
+                filepath = resource_path(os.path.join("web", clean_path))
                 
             # Prevent directory traversal
             abs_filepath = os.path.abspath(filepath)
-            abs_web_dir = os.path.abspath("web")
+            abs_web_dir = os.path.abspath(resource_path("web"))
             if not abs_filepath.startswith(abs_web_dir):
                 self.send_error(403, "Access Denied")
                 return
