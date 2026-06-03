@@ -22,7 +22,7 @@ python3 -m pip install pyinstaller
 echo "[2/3] Compiling standalone app using PyInstaller..."
 # --add-data "web:web" bundles the static assets
 # --noconsole hides the default terminal window
-python3 -m PyInstaller --onefile --noconsole --add-data "web:web" --name "AutoKey" app.py
+python3 -m PyInstaller --onefile --noconsole --add-data "web:web" --name "AutoKey" --noconfirm app.py
 
 echo "[3/3] Build completed successfully!"
 echo "👉 The executable is located at: dist/AutoKey"

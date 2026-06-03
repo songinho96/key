@@ -20,7 +20,7 @@ python -m pip install pyinstaller
 :: Compile the executable
 echo [2/3] Compiling standalone app using PyInstaller...
 :: On Windows, PyInstaller expects a semicolon (;) separator for --add-data
-python -m PyInstaller --onefile --noconsole --add-data "web;web" --name "AutoKey" app.py
+python -m PyInstaller --onefile --noconsole --add-data "web;web" --name "AutoKey" --noconfirm app.py
 
 if %errorlevel% neq 0 (
     echo ❌ Error: PyInstaller build failed!

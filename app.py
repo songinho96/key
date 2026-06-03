@@ -167,7 +167,7 @@ def send_keypress(keycode):
             event_up = cg.CGEventCreateKeyboardEvent(None, keycode, False)
             if event_down and event_up:
                 cg.CGEventPost(0, event_down)
-                time.sleep(0.01)
+                time.sleep(0.05)  # 50ms hold time to ensure games capture the key press
                 cg.CGEventPost(0, event_up)
                 cf.CFRelease(event_down)
                 cf.CFRelease(event_up)
@@ -181,19 +181,34 @@ def send_keypress(keycode):
         try:
             extra = ctypes.c_void_p(0)
             
-            # Key Down struct
-            ki_down = KEYBDINPUT(wVk=keycode, wScan=0, dwFlags=0, time=0, dwExtraInfo=extra)
+            # Translate VK Code to Hardware ScanCode for maximum compatibility with DirectInput/DirectX games
+            # MapVirtualKeyW(keycode, 0) -> maps VK to ScanCode
+            scan_code = user32.MapVirtualKeyW(keycode, 0)
+            
+            # Check if it is an extended key (such as Left, Up, Right, Down arrows, Delete, etc.)
+            # Extended keys on Windows need the KEYEVENTF_EXTENDEDKEY flag (0x0001)
+            is_extended = keycode in [0x25, 0x26, 0x27, 0x28, 0x2E, 0x2D, 0x24, 0x23, 0x21, 0x22]
+            
+            flags_down = 0x0008  # KEYEVENTF_SCANCODE
+            flags_up = 0x0008 | 0x0002  # KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP
+            
+            if is_extended:
+                flags_down |= 0x0001  # Add KEYEVENTF_EXTENDEDKEY
+                flags_up |= 0x0001
+                
+            # Key Down struct using Scancode
+            ki_down = KEYBDINPUT(wVk=0, wScan=scan_code, dwFlags=flags_down, time=0, dwExtraInfo=extra)
             ii_down = INPUT_UNION(ki=ki_down)
             input_down = INPUT(type=1, ii=ii_down)  # type 1 is INPUT_KEYBOARD
             
-            # Key Up struct (dwFlags = 0x0002 is KEYEVENTF_KEYUP)
-            ki_up = KEYBDINPUT(wVk=keycode, wScan=0, dwFlags=0x0002, time=0, dwExtraInfo=extra)
+            # Key Up struct using Scancode
+            ki_up = KEYBDINPUT(wVk=0, wScan=scan_code, dwFlags=flags_up, time=0, dwExtraInfo=extra)
             ii_up = INPUT_UNION(ki=ki_up)
             input_up = INPUT(type=1, ii=ii_up)
             
             # Post events using native user32 SendInput
             user32.SendInput(1, ctypes.byref(input_down), ctypes.sizeof(input_down))
-            time.sleep(0.01)
+            time.sleep(0.05)  # 50ms hold time to ensure games capture the key press
             user32.SendInput(1, ctypes.byref(input_up), ctypes.sizeof(input_up))
         except Exception as e:
             print(f"Error simulating Windows keycode {keycode}: {e}")
