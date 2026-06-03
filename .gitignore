@@ -9,3 +9,8 @@ config.json
 
 # macOS files
 .DS_Store
+
+# PyInstaller Build outputs
+build/
+dist/
+*.spec
