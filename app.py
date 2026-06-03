@@ -34,7 +34,16 @@ state = {
     "pixel_action_code_str": "Space",
     "pixel_action_keycode": 49,
     "pixel_action_name": "Space",
-    "pixel_cooldown_s": 1.5
+    "pixel_cooldown_s": 1.5,
+    
+    # Move & Jump Macro State
+    "jump_macro_enabled": False,
+    "jump_x": 500,
+    "jump_y": 500,
+    "jump_cooldown_s": 20.0,
+    "jump_action_code_str": "Space",
+    "jump_action_keycode": 49,
+    "jump_action_name": "Space"
 }
 state_lock = threading.Lock()
 sleep_event = threading.Event()
@@ -139,6 +148,10 @@ if IS_MAC:
         cg.CGDataProviderCopyData.argtypes = [ctypes.c_void_p]
         cf.CFDataGetBytePtr.restype = ctypes.c_void_p
         cf.CFDataGetBytePtr.argtypes = [ctypes.c_void_p]
+        
+        # Warp Mouse API
+        cg.CGWarpMouseCursorPosition.restype = None
+        cg.CGWarpMouseCursorPosition.argtypes = [CGPoint]
         
         cg_loaded = True
     except Exception as e:
@@ -294,6 +307,19 @@ def get_pixel_color(x, y):
             pass
     return f"#{r:02X}{g:02X}{b:02X}"
 
+def set_mouse_pos(x, y):
+    """Warps the mouse pointer to screen coordinate (x, y)"""
+    if IS_MAC and cg_loaded:
+        try:
+            cg.CGWarpMouseCursorPosition(CGPoint(x, y))
+        except Exception as e:
+            print(f"Error warp mouse macOS: {e}")
+    elif IS_WINDOWS and user32 is not None:
+        try:
+            user32.SetCursorPos(x, y)
+        except Exception as e:
+            print(f"Error warp mouse Windows: {e}")
+
 def get_mouse_pos_and_color():
     """Reads current mouse cursor position and color underneath it"""
     x, y = 0, 0
@@ -442,6 +468,47 @@ def pixel_trigger_thread_func():
         # Sleep for 100ms
         time.sleep(0.1)
 
+def jump_trigger_thread_func():
+    """Background thread executing the Move & Jump macro at specified intervals"""
+    global state
+    last_trigger_time = 0
+    
+    while True:
+        with state_lock:
+            running = state["running"]
+            jump_macro_enabled = state["jump_macro_enabled"]
+            jump_x = state["jump_x"]
+            jump_y = state["jump_y"]
+            jump_cooldown_s = state["jump_cooldown_s"]
+            jump_action_keycode = state["jump_action_keycode"]
+            jump_action_name = state["jump_action_name"]
+            humanizer_enabled = state["humanizer_enabled"]
+            
+        if running and jump_macro_enabled:
+            current_time = time.time()
+            
+            # Apply humanizer jitter to cooldown if enabled (±8%)
+            actual_cooldown = jump_cooldown_s
+            if humanizer_enabled and jump_cooldown_s > 1.0:
+                jitter = jump_cooldown_s * 0.08
+                actual_cooldown += random.uniform(-jitter, jitter)
+                
+            if current_time - last_trigger_time >= actual_cooldown:
+                print(f"[Jump Macro] Moving mouse to ({jump_x}, {jump_y}) and firing key {jump_action_name}...")
+                
+                # Set Mouse Position
+                set_mouse_pos(jump_x, jump_y)
+                
+                # Humanizer idle delay (50ms ~ 150ms)
+                time.sleep(random.uniform(0.05, 0.15) if humanizer_enabled else 0.08)
+                
+                # Fire Keypress
+                send_keypress(jump_action_keycode)
+                
+                last_trigger_time = current_time
+                
+        time.sleep(0.1)
+
 def load_config():
     """Load configuration settings from config.json if it exists"""
     global state
@@ -466,9 +533,18 @@ def load_config():
                     state["pixel_action_name"] = data.get("pixel_action_name", "Space")
                     state["pixel_cooldown_s"] = data.get("pixel_cooldown_s", 1.5)
                     
+                    # Jump Macro Config
+                    state["jump_macro_enabled"] = data.get("jump_macro_enabled", False)
+                    state["jump_x"] = data.get("jump_x", 500)
+                    state["jump_y"] = data.get("jump_y", 500)
+                    state["jump_cooldown_s"] = data.get("jump_cooldown_s", 20.0)
+                    state["jump_action_code_str"] = data.get("jump_action_code_str", "Space")
+                    state["jump_action_name"] = data.get("jump_action_name", "Space")
+                    
                     # Resolve keycodes
                     state["keycode"] = resolve_keycode(state["key_code_str"])
                     state["pixel_action_keycode"] = resolve_keycode(state["pixel_action_code_str"])
+                    state["jump_action_keycode"] = resolve_keycode(state["jump_action_code_str"])
             print(f"[Config] Loaded successfully.")
         except Exception as e:
             print(f"[Config] Error loading configuration: {e}")
@@ -491,7 +567,15 @@ def save_config():
             "pixel_match_type": state["pixel_match_type"],
             "pixel_action_code_str": state["pixel_action_code_str"],
             "pixel_action_name": state["pixel_action_name"],
-            "pixel_cooldown_s": state["pixel_cooldown_s"]
+            "pixel_cooldown_s": state["pixel_cooldown_s"],
+            
+            # Jump Macro Config
+            "jump_macro_enabled": state["jump_macro_enabled"],
+            "jump_x": state["jump_x"],
+            "jump_y": state["jump_y"],
+            "jump_cooldown_s": state["jump_cooldown_s"],
+            "jump_action_code_str": state["jump_action_code_str"],
+            "jump_action_name": state["jump_action_name"]
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -629,6 +713,21 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                     if "pixel_cooldown_s" in data:
                         state["pixel_cooldown_s"] = max(0.1, float(data["pixel_cooldown_s"]))
                         
+                    # Parse Jump macro configurations
+                    if "jump_macro_enabled" in data:
+                        state["jump_macro_enabled"] = bool(data["jump_macro_enabled"])
+                    if "jump_x" in data:
+                        state["jump_x"] = int(data["jump_x"])
+                    if "jump_y" in data:
+                        state["jump_y"] = int(data["jump_y"])
+                    if "jump_cooldown_s" in data:
+                        state["jump_cooldown_s"] = max(0.5, float(data["jump_cooldown_s"]))
+                    if "jump_action_code_str" in data:
+                        state["jump_action_code_str"] = str(data["jump_action_code_str"])
+                        state["jump_action_keycode"] = resolve_keycode(state["jump_action_code_str"])
+                    if "jump_action_name" in data:
+                        state["jump_action_name"] = str(data["jump_action_name"])
+                        
                 save_config()
                 sleep_event.set()  # Apply changes immediately
                 print(f"[Control] Config updated.")
@@ -669,6 +768,9 @@ if __name__ == "__main__":
     
     # Initialize background pixel checking loop
     threading.Thread(target=pixel_trigger_thread_func, daemon=True).start()
+    
+    # Initialize background move & jump macro loop
+    threading.Thread(target=jump_trigger_thread_func, daemon=True).start()
     
     # Open dashboard in browser
     threading.Thread(target=open_dashboard, daemon=True).start()

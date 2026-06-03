@@ -1030,3 +1030,39 @@ input:checked + .switch-slider.green:before {
     color: var(--text-muted);
     pointer-events: none;
 }
+
+/* Move & Jump Section Styling */
+.jump-group {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 20px;
+    margin-top: 8px;
+}
+
+.jump-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--card-border);
+    padding: 2px 8px;
+    border-radius: 6px;
+    transition: var(--transition-smooth);
+}
+
+.jump-badge.active {
+    color: var(--color-amber);
+    border-color: rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.06);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.15);
+}
+
+input:checked + .switch-slider.amber {
+    background-color: rgba(245, 158, 11, 0.2);
+    border-color: var(--color-amber);
+}
+
+input:checked + .switch-slider.amber:before {
+    transform: translateX(20px);
+    background-color: var(--color-amber);
+    box-shadow: 0 0 8px var(--color-amber);
+}
