@@ -38,8 +38,8 @@ state = {
     
     # Move & Jump Macro State
     "jump_macro_enabled": False,
-    "jump_x": 500,
-    "jump_y": 500,
+    "jump_move_direction": "right",
+    "jump_move_duration_s": 3.0,
     "jump_cooldown_s": 20.0,
     "jump_action_code_str": "KeyC",
     "jump_action_keycode": 8 if IS_MAC else 0x43,
@@ -607,7 +607,7 @@ def pixel_trigger_thread_func():
         time.sleep(0.1)
 
 def jump_trigger_thread_func():
-    """Background thread executing the Move & Jump & Climb macro with Minimap yellow dot navigation"""
+    """Background thread executing the Move & Jump & Climb macro using walking duration"""
     global state
     last_trigger_time = 0
     
@@ -621,8 +621,8 @@ def jump_trigger_thread_func():
         with state_lock:
             running = state["running"]
             jump_macro_enabled = state["jump_macro_enabled"]
-            jump_x = state["jump_x"]
-            jump_y = state["jump_y"]
+            jump_move_direction = state["jump_move_direction"]
+            jump_move_duration_s = state["jump_move_duration_s"]
             jump_cooldown_s = state["jump_cooldown_s"]
             jump_action_keycode = state["jump_action_keycode"]
             jump_action_name = state["jump_action_name"]
@@ -638,92 +638,47 @@ def jump_trigger_thread_func():
                 actual_cooldown += random.uniform(-jitter, jitter)
                 
             if current_time - last_trigger_time >= actual_cooldown:
-                print(f"[Navigate Macro] Commencing movement towards target X: {jump_x} on minimap...")
+                print(f"[Move & Climb Macro] Starting walk {jump_move_direction} for {jump_move_duration_s}s...")
                 
-                # 1. Navigation loop
-                start_nav_time = time.time()
-                nav_timeout = 12.0  # 12 seconds max to reach target
-                reached = False
-                last_dir = None
+                # 1. Walk in the specified direction
+                walk_key = right_kc if jump_move_direction == "right" else left_kc
                 
-                while running and (time.time() - start_nav_time < nav_timeout):
-                    # Live check of running state
-                    with state_lock:
-                        running = state["running"]
-                        if not running:
-                            break
-                            
-                    pos = find_character_yellow_dot()
-                    if pos is None:
-                        # If character is not found, temporarily stop movement
-                        if last_dir:
-                            send_key_up(last_dir)
-                            last_dir = None
-                        time.sleep(0.1)
-                        continue
-                        
-                    curr_x, curr_y = pos
-                    
-                    # Target tolerance on minimap is ±2 pixels
-                    tolerance = 2
-                    if curr_x < jump_x - tolerance:
-                        # Move Right
-                        if last_dir == left_kc:
-                            send_key_up(left_kc)
-                        if last_dir != right_kc:
-                            send_key_down(right_kc)
-                            last_dir = right_kc
-                    elif curr_x > jump_x + tolerance:
-                        # Move Left
-                        if last_dir == right_kc:
-                            send_key_up(right_kc)
-                        if last_dir != left_kc:
-                            send_key_down(left_kc)
-                            last_dir = left_kc
-                    else:
-                        # Reached the exact coordinate!
-                        reached = True
-                        break
-                        
-                    time.sleep(0.05) # Scan minimap at 20Hz
-                    
-                # Stop walking
-                if last_dir:
-                    send_key_up(last_dir)
-                    
-                # Proceed with jump climb if reached or timed out but active
-                if reached or (running and not reached):
-                    if not reached:
-                        print("[Navigate Macro] Navigation timed out. Attempting grab/jump sequence anyway.")
-                    else:
-                        print("[Navigate Macro] Arrived at target X coordinate. Launching jump grab...")
-                        
-                    # Brief stop (100ms ~ 250ms)
-                    time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
-                    
-                    # Press Jump Key
-                    send_keypress(jump_action_keycode)
-                    
-                    # Brief delay before climbing (80ms ~ 150ms)
-                    time.sleep(random.uniform(0.08, 0.15) if humanizer_enabled else 0.1)
-                    
-                    # Climb Up (Hold ArrowUp for 2 seconds)
-                    hold_up_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
-                    print(f"[Navigate Macro] Holding ArrowUp for {hold_up_duration:.2f} seconds...")
-                    send_key_down(up_kc)
-                    time.sleep(hold_up_duration)
-                    send_key_up(up_kc)
-                    
-                    # Brief stop (100ms ~ 250ms)
-                    time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
-                    
-                    # Climb Down (Hold ArrowDown for 2 seconds)
-                    hold_down_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
-                    print(f"[Navigate Macro] Holding ArrowDown for {hold_down_duration:.2f} seconds...")
-                    send_key_down(down_kc)
-                    time.sleep(hold_down_duration)
-                    send_key_up(down_kc)
-                    
+                # Apply humanizer to walking duration (±8%)
+                actual_walk_duration = jump_move_duration_s
+                if humanizer_enabled and jump_move_duration_s > 0.5:
+                    actual_walk_duration += random.uniform(-jump_move_duration_s * 0.08, jump_move_duration_s * 0.08)
+                
+                # Press walk key
+                send_key_down(walk_key)
+                time.sleep(actual_walk_duration)
+                send_key_up(walk_key)
+                
+                # Brief stop (100ms ~ 250ms)
+                time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
+                
+                # 2. Press Jump Key (e.g. C) to grab
+                send_keypress(jump_action_keycode)
+                
+                # Brief delay before climbing (80ms ~ 150ms)
+                time.sleep(random.uniform(0.08, 0.15) if humanizer_enabled else 0.1)
+                
+                # 3. Climb Up (Hold ArrowUp for 2 seconds)
+                hold_up_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
+                print(f"[Move & Climb Macro] Holding ArrowUp for {hold_up_duration:.2f} seconds...")
+                send_key_down(up_kc)
+                time.sleep(hold_up_duration)
+                send_key_up(up_kc)
+                
+                # Brief stop (100ms ~ 250ms)
+                time.sleep(random.uniform(0.1, 0.25) if humanizer_enabled else 0.15)
+                
+                # 4. Climb Down (Hold ArrowDown for 2 seconds)
+                hold_down_duration = random.uniform(1.8, 2.2) if humanizer_enabled else 2.0
+                print(f"[Move & Climb Macro] Holding ArrowDown for {hold_down_duration:.2f} seconds...")
+                send_key_down(down_kc)
+                time.sleep(hold_down_duration)
+                send_key_up(down_kc)
+                
                 last_trigger_time = time.time()
                 
         time.sleep(0.1)
@@ -754,8 +709,8 @@ def load_config():
                     
                     # Jump Macro Config
                     state["jump_macro_enabled"] = data.get("jump_macro_enabled", False)
-                    state["jump_x"] = data.get("jump_x", 500)
-                    state["jump_y"] = data.get("jump_y", 500)
+                    state["jump_move_direction"] = data.get("jump_move_direction", "right")
+                    state["jump_move_duration_s"] = data.get("jump_move_duration_s", 3.0)
                     state["jump_cooldown_s"] = data.get("jump_cooldown_s", 20.0)
                     state["jump_action_code_str"] = data.get("jump_action_code_str", "KeyC")
                     state["jump_action_name"] = data.get("jump_action_name", "C")
@@ -790,8 +745,8 @@ def save_config():
             
             # Jump Macro Config
             "jump_macro_enabled": state["jump_macro_enabled"],
-            "jump_x": state["jump_x"],
-            "jump_y": state["jump_y"],
+            "jump_move_direction": state["jump_move_direction"],
+            "jump_move_duration_s": state["jump_move_duration_s"],
             "jump_cooldown_s": state["jump_cooldown_s"],
             "jump_action_code_str": state["jump_action_code_str"],
             "jump_action_name": state["jump_action_name"]
@@ -935,10 +890,10 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                     # Parse Jump macro configurations
                     if "jump_macro_enabled" in data:
                         state["jump_macro_enabled"] = bool(data["jump_macro_enabled"])
-                    if "jump_x" in data:
-                        state["jump_x"] = int(data["jump_x"])
-                    if "jump_y" in data:
-                        state["jump_y"] = int(data["jump_y"])
+                    if "jump_move_direction" in data:
+                        state["jump_move_direction"] = str(data["jump_move_direction"])
+                    if "jump_move_duration_s" in data:
+                        state["jump_move_duration_s"] = max(0.1, float(data["jump_move_duration_s"]))
                     if "jump_cooldown_s" in data:
                         state["jump_cooldown_s"] = max(0.5, float(data["jump_cooldown_s"]))
                     if "jump_action_code_str" in data:

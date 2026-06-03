@@ -68,9 +68,8 @@ const pickerCountdown = document.getElementById("pickerCountdown");
 const jumpToggle = document.getElementById("jumpToggle");
 const jumpBadge = document.getElementById("jumpBadge");
 const jumpConfigContainer = document.getElementById("jumpConfigContainer");
-const jumpXInput = document.getElementById("jumpXInput");
-const jumpYInput = document.getElementById("jumpYInput");
-const btnPickJumpPos = document.getElementById("btnPickJumpPos");
+const jumpDirection = document.getElementById("jumpDirection");
+const jumpMoveDurationInput = document.getElementById("jumpMoveDurationInput");
 const jumpKeyCapDisplay = document.getElementById("jumpKeyCapDisplay");
 const btnRecordJumpKey = document.getElementById("btnRecordJumpKey");
 const jumpCooldownInput = document.getElementById("jumpCooldownInput");
@@ -108,12 +107,12 @@ let appState = {
     
     // Move & Jump config fields
     jump_macro_enabled: false,
-    jump_x: 500,
-    jump_y: 500,
+    jump_move_direction: "right",
+    jump_move_duration_s: 3.0,
     jump_cooldown_s: 20.0,
-    jump_action_code_str: "Space",
-    jump_action_keycode: 49,
-    jump_action_name: "Space"
+    jump_action_code_str: "KeyC",
+    jump_action_keycode: 8,
+    jump_action_name: "C"
 };
 let isRecording = false;
 let recordingTarget = "main"; // "main", "pixel", or "jump"
@@ -157,9 +156,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Move & Jump bindings
     jumpToggle.addEventListener("change", handleJumpToggleChange);
-    jumpXInput.addEventListener("change", handleJumpCoordsChange);
-    jumpYInput.addEventListener("change", handleJumpCoordsChange);
-    btnPickJumpPos.addEventListener("click", startJumpPosPicking);
+    jumpDirection.addEventListener("change", handleJumpDirectionChange);
+    jumpMoveDurationInput.addEventListener("change", handleJumpMoveDurationChange);
     btnRecordJumpKey.addEventListener("click", () => startKeyRecording("jump"));
     jumpCooldownInput.addEventListener("change", handleJumpCooldownChange);
     
@@ -231,8 +229,8 @@ function startPolling() {
                     appState.pixel_cooldown_s = newState.pixel_cooldown_s;
                     
                     appState.jump_macro_enabled = newState.jump_macro_enabled;
-                    appState.jump_x = newState.jump_x;
-                    appState.jump_y = newState.jump_y;
+                    appState.jump_move_direction = newState.jump_move_direction;
+                    appState.jump_move_duration_s = newState.jump_move_duration_s;
                     appState.jump_cooldown_s = newState.jump_cooldown_s;
                     appState.jump_action_code_str = newState.jump_action_code_str;
                     appState.jump_action_keycode = newState.jump_action_keycode;
@@ -283,8 +281,8 @@ function updateUI() {
     // Update Move & Jump inputs & elements
     jumpToggle.checked = appState.jump_macro_enabled;
     updateJumpBadge();
-    jumpXInput.value = appState.jump_x;
-    jumpYInput.value = appState.jump_y;
+    jumpDirection.value = appState.jump_move_direction;
+    jumpMoveDurationInput.value = appState.jump_move_duration_s;
     jumpKeyCapDisplay.textContent = appState.jump_action_name;
     jumpCooldownInput.value = appState.jump_cooldown_s;
     
@@ -453,8 +451,8 @@ async function saveConfigToServer() {
                 
                 // Jump fields
                 jump_macro_enabled: appState.jump_macro_enabled,
-                jump_x: appState.jump_x,
-                jump_y: appState.jump_y,
+                jump_move_direction: appState.jump_move_direction,
+                jump_move_duration_s: appState.jump_move_duration_s,
                 jump_cooldown_s: appState.jump_cooldown_s,
                 jump_action_code_str: appState.jump_action_code_str,
                 jump_action_name: appState.jump_action_name
@@ -669,15 +667,16 @@ function handleJumpToggleChange(e) {
     saveConfigToServer();
 }
 
-function handleJumpCoordsChange() {
-    let x = parseInt(jumpXInput.value, 10);
-    let y = parseInt(jumpYInput.value, 10);
-    if (isNaN(x) || x < 0) x = 0;
-    if (isNaN(y) || y < 0) y = 0;
-    jumpXInput.value = x;
-    jumpYInput.value = y;
-    appState.jump_x = x;
-    appState.jump_y = y;
+function handleJumpDirectionChange(e) {
+    appState.jump_move_direction = e.target.value;
+    saveConfigToServer();
+}
+
+function handleJumpMoveDurationChange(e) {
+    let val = parseFloat(e.target.value);
+    if (isNaN(val) || val < 0.1) val = 0.1;
+    e.target.value = val;
+    appState.jump_move_duration_s = val;
     saveConfigToServer();
 }
 
@@ -699,40 +698,4 @@ function updateJumpBadge() {
         jumpBadge.className = "jump-badge";
         jumpConfigContainer.style.display = "none";
     }
-}
-
-function startJumpPosPicking() {
-    pickerOverlay.classList.add("active");
-    let timeLeft = 3;
-    pickerCountdown.textContent = timeLeft;
-    
-    const interval = setInterval(() => {
-        timeLeft--;
-        if (timeLeft > 0) {
-            pickerCountdown.textContent = timeLeft;
-        } else {
-            clearInterval(interval);
-            // Trigger pick API
-            fetch("/api/pick")
-                .then(res => {
-                    if (!res.ok) throw new Error("Pick request failed");
-                    return res.json();
-                })
-                .then(data => {
-                    jumpXInput.value = data.x;
-                    jumpYInput.value = data.y;
-                    
-                    appState.jump_x = data.x;
-                    appState.jump_y = data.y;
-                    
-                    saveConfigToServer();
-                })
-                .catch(err => {
-                    console.error("Error picking jump position:", err);
-                })
-                .finally(() => {
-                    pickerOverlay.classList.remove("active");
-                });
-        }
-    }, 1000);
 }
