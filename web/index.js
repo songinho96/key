@@ -108,6 +108,7 @@ let appState = {
     count: 0,
     macro_enabled: false,
     macro_interval_s: 60.0,
+    macro_delay_between_s: 0.2,
     macro_actions: [],
     humanizer_enabled: true,
     macos_accessible: true,
@@ -171,6 +172,9 @@ document.addEventListener("DOMContentLoaded", () => {
     macroToggle.addEventListener("change", handleMacroToggleChange);
     if (document.getElementById("macroIntervalInput")) {
         document.getElementById("macroIntervalInput").addEventListener("change", handleMacroIntervalChange);
+    }
+    if (document.getElementById("macroDelayBetweenInput")) {
+        document.getElementById("macroDelayBetweenInput").addEventListener("change", handleMacroDelayBetweenChange);
     }
     
     // Custom Sequence form bindings
@@ -318,6 +322,7 @@ function startPolling() {
                     appState.interval_ms = newState.interval_ms;
                     appState.macro_enabled = newState.macro_enabled;
                     appState.macro_interval_s = newState.macro_interval_s;
+                    appState.macro_delay_between_s = newState.macro_delay_between_s;
                     appState.macro_actions = newState.macro_actions || [];
                     appState.humanizer_enabled = newState.humanizer_enabled;
                     
@@ -376,6 +381,9 @@ function updateUI() {
     updateMacroBadge();
     if (document.getElementById("macroIntervalInput")) {
         document.getElementById("macroIntervalInput").value = appState.macro_interval_s;
+    }
+    if (document.getElementById("macroDelayBetweenInput")) {
+        document.getElementById("macroDelayBetweenInput").value = appState.macro_delay_between_s;
     }
     updateHumanizerBadge();
     renderMacroActions();
@@ -442,10 +450,10 @@ function handleMacroIntervalChange(e) {
     saveConfigToServer();
 }
 
-function handleMacroMoveDurationChange(e) {
+function handleMacroDelayBetweenChange(e) {
     let val = parseFloat(e.target.value);
-    if (isNaN(val) || val < 0.1) val = 3.0;
-    appState.macro_move_duration_s = val;
+    if (isNaN(val) || val < 0.0) val = 0.2;
+    appState.macro_delay_between_s = val;
     saveConfigToServer();
 }
 
@@ -592,6 +600,7 @@ async function saveConfigToServer() {
                 interval_ms: appState.interval_ms,
                 macro_enabled: appState.macro_enabled,
                 macro_interval_s: appState.macro_interval_s,
+                macro_delay_between_s: appState.macro_delay_between_s,
                 macro_actions: appState.macro_actions || [],
                 humanizer_enabled: appState.humanizer_enabled,
                 
@@ -1303,6 +1312,9 @@ function renderMacroActions() {
             }];
         }
         
+        const hasWait = keysList.some(k => k.type === "wait");
+        const suffix = hasWait ? "대기" : "누름";
+        
         const badgeElements = keysList.map(k => {
             let label = k.type;
             if (k.type === "right") label = "우측";
@@ -1310,6 +1322,7 @@ function renderMacroActions() {
             else if (k.type === "up") label = "상측";
             else if (k.type === "down") label = "하측";
             else if (k.type === "key") label = k.key_name || "키";
+            else if (k.type === "wait") label = "대기";
             
             return `<span class="action-seq-badge ${k.type}">${label}</span>`;
         }).join(" + ");
@@ -1318,7 +1331,7 @@ function renderMacroActions() {
             <div class="action-seq-info">
                 <span class="action-seq-index">${idx + 1}</span>
                 <span style="display: inline-flex; align-items: center; gap: 4px;">${badgeElements}</span>
-                <span class="action-seq-duration">${act.duration_s}초 누름</span>
+                <span class="action-seq-duration">${act.duration_s}초 ${suffix}</span>
             </div>
             <button type="button" class="action-seq-delete-btn" data-index="${idx}" title="삭제">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>

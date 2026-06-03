@@ -25,9 +25,10 @@ state = {
     "count": 0,
     "macro_enabled": False,
     "macro_interval_s": 60.0,
+    "macro_delay_between_s": 0.2,
     "macro_actions": [
-        {"type": "right", "duration_s": 3.0},
-        {"type": "left", "duration_s": 3.0}
+        {"keys": [{"type": "right"}], "duration_s": 3.0},
+        {"keys": [{"type": "left"}], "duration_s": 3.0}
     ],
     "humanizer_enabled": True,  # Anti-Detection (Humanizer) Mode
     "macos_accessible": True,   # macOS Accessibility privilege status
@@ -758,6 +759,7 @@ def presser_thread_func():
                 with state_lock:
                     actions = list(state.get("macro_actions", []))
                     base_interval = state.get("macro_interval_s", 60.0)
+                    delay_between = state.get("macro_delay_between_s", 0.2)
                 
                 # Execute actions in sequence
                 for idx, act in enumerate(actions):
@@ -796,6 +798,8 @@ def presser_thread_func():
                             kc = down_kc
                         elif t == "key":
                             kc = k_info.get("keycode")
+                        elif t == "wait":
+                            act_names.append("Wait")
                             
                         if kc is not None:
                             kcs.append(kc)
@@ -808,10 +812,19 @@ def presser_thread_func():
                         time.sleep(actual_duration)
                         for kc in kcs:
                             send_key_up(kc)
+                    else:
+                        # Wait action or no valid keys
+                        lbl = ', '.join(act_names) if act_names else "Wait"
+                        print(f"[Macro] Action {idx+1}/{len(actions)}: {lbl} for {actual_duration:.2f} seconds...")
+                        time.sleep(actual_duration)
                     
                     # Brief pause between sequential actions (randomized if humanizer active)
-                    pause_dur = random.uniform(0.15, 0.35) if humanizer_enabled else 0.2
-                    time.sleep(pause_dur)
+                    if humanizer_enabled and delay_between > 0.05:
+                        pause_jitter = delay_between * 0.15
+                        pause_dur = delay_between + random.uniform(-pause_jitter, pause_jitter)
+                    else:
+                        pause_dur = delay_between
+                    time.sleep(max(0.005, pause_dur))
                 
                 # Apply humanizer jitter to next macro delay if enabled (±8%)
                 if humanizer_enabled and base_interval > 5.0:
@@ -1080,6 +1093,7 @@ def load_config():
                     state["interval_ms"] = data.get("interval_ms", 1000)
                     state["macro_enabled"] = data.get("macro_enabled", False)
                     state["macro_interval_s"] = data.get("macro_interval_s", 60.0)
+                    state["macro_delay_between_s"] = data.get("macro_delay_between_s", 0.2)
                     state["macro_actions"] = data.get("macro_actions", [
                         {"keys": [{"type": "right"}], "duration_s": 3.0},
                         {"keys": [{"type": "left"}], "duration_s": 3.0}
@@ -1149,6 +1163,7 @@ def save_config():
             "interval_ms": state["interval_ms"],
             "macro_enabled": state["macro_enabled"],
             "macro_interval_s": state["macro_interval_s"],
+            "macro_delay_between_s": state["macro_delay_between_s"],
             "macro_actions": [
                 {
                     "duration_s": act.get("duration_s", 1.0),
@@ -1326,6 +1341,8 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                         state["macro_enabled"] = bool(data["macro_enabled"])
                     if "macro_interval_s" in data:
                         state["macro_interval_s"] = max(1.0, float(data["macro_interval_s"]))
+                    if "macro_delay_between_s" in data:
+                        state["macro_delay_between_s"] = max(0.0, float(data["macro_delay_between_s"]))
                     if "macro_actions" in data:
                         raw_actions = data["macro_actions"]
                         if isinstance(raw_actions, list):

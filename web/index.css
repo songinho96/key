@@ -1409,6 +1409,7 @@ input:checked + .switch-slider.amber:before {
 .action-seq-badge.up { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
 .action-seq-badge.down { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
 .action-seq-badge.key { background: rgba(167, 139, 250, 0.15); color: #c084fc; border: 1px solid rgba(167, 139, 250, 0.3); }
+.action-seq-badge.wait { background: rgba(107, 114, 128, 0.25); color: #9ca3af; border: 1px solid rgba(107, 114, 128, 0.4); }
 
 .action-seq-duration {
     font-family: var(--font-mono);
