@@ -108,7 +108,7 @@ let appState = {
     count: 0,
     macro_enabled: false,
     macro_interval_s: 60.0,
-    macro_move_duration_s: 3.0,
+    macro_actions: [],
     humanizer_enabled: true,
     macos_accessible: true,
     
@@ -142,7 +142,8 @@ let appState = {
     mouse_y2: 400
 };
 let isRecording = false;
-let recordingTarget = "main"; // "main", "pixel", "jump", or "sched_{id}"
+let recordingTarget = "main"; // "main", "pixel", "jump", "sched_{id}", or "action_key"
+let tempActionKey = { code_str: "Space", name: "Space" };
 let recordingSchedId = null;   // active scheduled macro id during recording
 let pollIntervalId = null;
 let isUpdatingConfig = false;
@@ -170,8 +171,27 @@ document.addEventListener("DOMContentLoaded", () => {
     if (document.getElementById("macroIntervalInput")) {
         document.getElementById("macroIntervalInput").addEventListener("change", handleMacroIntervalChange);
     }
-    if (document.getElementById("macroMoveDurationInput")) {
-        document.getElementById("macroMoveDurationInput").addEventListener("change", handleMacroMoveDurationChange);
+    
+    // Custom Sequence form bindings
+    const actionTypeSelect = document.getElementById("actionTypeSelect");
+    const actionKeyCardWrapper = document.getElementById("actionKeyCardWrapper");
+    const btnRecordActionKey = document.getElementById("btnRecordActionKey");
+    const btnAddSeqAction = document.getElementById("btnAddSeqAction");
+    
+    if (actionTypeSelect) {
+        actionTypeSelect.addEventListener("change", (e) => {
+            if (e.target.value === "key") {
+                actionKeyCardWrapper.style.display = "block";
+            } else {
+                actionKeyCardWrapper.style.display = "none";
+            }
+        });
+    }
+    if (btnRecordActionKey) {
+        btnRecordActionKey.addEventListener("click", () => startKeyRecording("action_key"));
+    }
+    if (btnAddSeqAction) {
+        btnAddSeqAction.addEventListener("click", handleAddSeqAction);
     }
     
     // Humanizer toggle binding
@@ -278,7 +298,7 @@ function startPolling() {
                     appState.interval_ms = newState.interval_ms;
                     appState.macro_enabled = newState.macro_enabled;
                     appState.macro_interval_s = newState.macro_interval_s;
-                    appState.macro_move_duration_s = newState.macro_move_duration_s;
+                    appState.macro_actions = newState.macro_actions || [];
                     appState.humanizer_enabled = newState.humanizer_enabled;
                     
                     appState.pixel_macro_enabled = newState.pixel_macro_enabled;
@@ -308,6 +328,7 @@ function startPolling() {
                     updateJumpBadge();
                     updateSchedBadge();
                     renderSchedMacros();
+                    renderMacroActions();
                 }
                 
                 updateUIStateOnly();
@@ -336,10 +357,8 @@ function updateUI() {
     if (document.getElementById("macroIntervalInput")) {
         document.getElementById("macroIntervalInput").value = appState.macro_interval_s;
     }
-    if (document.getElementById("macroMoveDurationInput")) {
-        document.getElementById("macroMoveDurationInput").value = appState.macro_move_duration_s;
-    }
     updateHumanizerBadge();
+    renderMacroActions();
     
     // Update pixel macro inputs & elements
     pixelToggle.checked = appState.pixel_macro_enabled;
@@ -553,7 +572,7 @@ async function saveConfigToServer() {
                 interval_ms: appState.interval_ms,
                 macro_enabled: appState.macro_enabled,
                 macro_interval_s: appState.macro_interval_s,
-                macro_move_duration_s: appState.macro_move_duration_s,
+                macro_actions: appState.macro_actions || [],
                 humanizer_enabled: appState.humanizer_enabled,
                 
                 // Pixel fields
@@ -648,6 +667,15 @@ async function handleGlobalKeyDown(event) {
             recordingSchedId = null;
             stopKeyRecording();
             return; // Skip updateUI and saveConfigToServer below (already done in _applySchedKey)
+        } else if (recordingTarget === "action_key") {
+            tempActionKey = {
+                code_str: keyDetails.code_str,
+                name: keyDetails.name
+            };
+            const display = document.getElementById("actionKeyCapDisplay");
+            if (display) display.textContent = keyDetails.name;
+            stopKeyRecording();
+            return;
         } else {
             appState.key_code_str = keyDetails.code_str;
             appState.key_name = keyDetails.name;
@@ -1212,4 +1240,89 @@ function _applySchedKey(id, keyDetails) {
         renderSchedMacros();
         saveConfigToServer();
     }
+}
+
+// Render Custom Sequence actions
+function renderMacroActions() {
+    const listContainer = document.getElementById("actionsSequenceList");
+    if (!listContainer) return;
+    
+    listContainer.innerHTML = "";
+    const actions = appState.macro_actions || [];
+    
+    if (actions.length === 0) {
+        listContainer.innerHTML = `
+            <div style="font-size: 11px; color: var(--text-secondary); text-align: center; padding: 10px; border: 1px dashed rgba(255,255,255,0.06); border-radius: 6px;">
+                등록된 동작이 없습니다.<br>아래에서 동작을 추가하세요.
+            </div>
+        `;
+        return;
+    }
+    
+    actions.forEach((act, idx) => {
+        const card = document.createElement("div");
+        card.className = "action-seq-card";
+        
+        let typeLabel = act.type;
+        let typeClass = act.type;
+        if (act.type === "right") typeLabel = "우측";
+        else if (act.type === "left") typeLabel = "좌측";
+        else if (act.type === "up") typeLabel = "상측";
+        else if (act.type === "down") typeLabel = "하측";
+        else if (act.type === "key") typeLabel = act.key_name || "키";
+        
+        card.innerHTML = `
+            <div class="action-seq-info">
+                <span class="action-seq-index">${idx + 1}</span>
+                <span class="action-seq-badge ${typeClass}">${typeLabel}</span>
+                <span class="action-seq-duration">${act.duration_s}초 누름</span>
+            </div>
+            <button type="button" class="action-seq-delete-btn" data-index="${idx}" title="삭제">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </button>
+        `;
+        
+        // Bind delete action
+        card.querySelector(".action-seq-delete-btn").addEventListener("click", () => {
+            deleteMacroAction(idx);
+        });
+        
+        listContainer.appendChild(card);
+    });
+}
+
+// Delete action from sequence
+function deleteMacroAction(index) {
+    if (!appState.macro_actions) appState.macro_actions = [];
+    appState.macro_actions.splice(index, 1);
+    renderMacroActions();
+    saveConfigToServer();
+}
+
+// Add new action to sequence
+function handleAddSeqAction() {
+    const typeSelect = document.getElementById("actionTypeSelect");
+    const durationInput = document.getElementById("actionDurationInput");
+    
+    if (!typeSelect || !durationInput) return;
+    
+    const type = typeSelect.value;
+    let duration = parseFloat(durationInput.value);
+    if (isNaN(duration) || duration < 0.1) duration = 1.0;
+    
+    let newAction = {
+        type: type,
+        duration_s: duration
+    };
+    
+    if (type === "key") {
+        newAction.key_code_str = tempActionKey.code_str;
+        newAction.key_name = tempActionKey.name;
+    }
+    
+    if (!appState.macro_actions) appState.macro_actions = [];
+    appState.macro_actions.push(newAction);
+    
+    renderMacroActions();
+    saveConfigToServer();
 }
