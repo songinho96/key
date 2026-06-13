@@ -22,6 +22,7 @@ state = {
     "keycode": 49,             # Resolved OS-specific virtual code
     "key_name": "Space",
     "interval_ms": 1000,
+    "press_mode": "repeat",     # "repeat" or "hold"
     "count": 0,
     "macro_enabled": False,
     "macro_interval_s": 60.0,
@@ -727,25 +728,48 @@ def presser_thread_func():
     last_macro_time = time.time()
     next_macro_delay = 60.0  # Dynamic macro delay target (randomized if humanizer is active)
     
+    is_holding = False
+    held_keycode = None
+    
     while True:
         with state_lock:
             running = state["running"]
             keycode = state["keycode"]
             interval_ms = state["interval_ms"]
+            press_mode = state.get("press_mode", "repeat")
             macro_enabled = state["macro_enabled"]
             humanizer_enabled = state["humanizer_enabled"]
             
         if running:
-            # Jittering key press interval (±8% of interval, max ±100ms) to remove uniform rhythm
-            if humanizer_enabled and interval_ms > 50:
-                jitter_range = min(100, int(interval_ms * 0.08))
-                actual_interval = (interval_ms + random.randint(-jitter_range, jitter_range)) / 1000.0
+            # Handle key release if press mode changed to repeat or keycode changed
+            if is_holding and (keycode != held_keycode or press_mode == "repeat"):
+                print(f"[Hold Mode] Key released: {held_keycode}")
+                send_key_up(held_keycode)
+                is_holding = False
+                held_keycode = None
+
+            # Calculate sleep interval
+            if press_mode == "hold":
+                # Quick status checking interval when holding a key
+                actual_interval = 0.05
             else:
-                actual_interval = interval_ms / 1000.0
+                # Jittering key press interval (±8% of interval, max ±100ms) to remove uniform rhythm
+                if humanizer_enabled and interval_ms > 50:
+                    jitter_range = min(100, int(interval_ms * 0.08))
+                    actual_interval = (interval_ms + random.randint(-jitter_range, jitter_range)) / 1000.0
+                else:
+                    actual_interval = interval_ms / 1000.0
                 
             # Check macro timer
             current_time = time.time()
             if macro_enabled and (current_time - last_macro_time >= next_macro_delay):
+                # Release held key before movement macro
+                if is_holding:
+                    print(f"[Hold Mode] Temporarily releasing key {held_keycode} before movement sequence...")
+                    send_key_up(held_keycode)
+                    is_holding = False
+                    held_keycode = None
+
                 # Idle pause (randomized between 1.7s and 2.5s if humanizer active, else 2s)
                 idle_delay = random.uniform(1.7, 2.5) if humanizer_enabled else 2.0
                 print(f"[Macro] Idle delay: pausing {idle_delay:.2f} seconds before movement...")
@@ -835,15 +859,29 @@ def presser_thread_func():
                 
                 last_macro_time = time.time()
             
-            # Send continuous key
-            send_keypress(keycode)
-            with state_lock:
-                state["count"] += 1
+            # Send continuous key (either press once or repeat)
+            if press_mode == "hold":
+                if not is_holding:
+                    print(f"[Hold Mode] Pressing down key: {keycode}")
+                    send_key_down(keycode)
+                    is_holding = True
+                    held_keycode = keycode
+            else:
+                send_keypress(keycode)
+                with state_lock:
+                    state["count"] += 1
                 
             # Smart interruptible sleep
             sleep_event.clear()
             sleep_event.wait(timeout=actual_interval)
         else:
+            # Release held key when macro is stopped
+            if is_holding:
+                print(f"[Hold Mode] Releasing key: {held_keycode} (stopped)")
+                send_key_up(held_keycode)
+                is_holding = False
+                held_keycode = None
+                
             # Reset timer when stopped
             last_macro_time = time.time()
             with state_lock:
@@ -1091,6 +1129,7 @@ def load_config():
                     state["key_code_str"] = data.get("key_code_str", "Space")
                     state["key_name"] = data.get("key_name", "Space")
                     state["interval_ms"] = data.get("interval_ms", 1000)
+                    state["press_mode"] = data.get("press_mode", "repeat")
                     state["macro_enabled"] = data.get("macro_enabled", False)
                     state["macro_interval_s"] = data.get("macro_interval_s", 60.0)
                     state["macro_delay_between_s"] = data.get("macro_delay_between_s", 0.2)
@@ -1161,6 +1200,7 @@ def save_config():
             "key_code_str": state["key_code_str"],
             "key_name": state["key_name"],
             "interval_ms": state["interval_ms"],
+            "press_mode": state["press_mode"],
             "macro_enabled": state["macro_enabled"],
             "macro_interval_s": state["macro_interval_s"],
             "macro_delay_between_s": state["macro_delay_between_s"],
@@ -1337,6 +1377,8 @@ class AutoKeyAPIHandler(BaseHTTPRequestHandler):
                         state["key_name"] = str(data["key_name"])
                     if "interval_ms" in data:
                         state["interval_ms"] = max(10, int(data["interval_ms"]))
+                    if "press_mode" in data:
+                        state["press_mode"] = str(data["press_mode"])
                     if "macro_enabled" in data:
                         state["macro_enabled"] = bool(data["macro_enabled"])
                     if "macro_interval_s" in data:

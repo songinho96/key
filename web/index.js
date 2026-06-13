@@ -105,6 +105,7 @@ let appState = {
     keycode: 49,
     key_name: "Space",
     interval_ms: 1000,
+    press_mode: "repeat",
     count: 0,
     macro_enabled: false,
     macro_interval_s: 60.0,
@@ -167,6 +168,15 @@ document.addEventListener("DOMContentLoaded", () => {
     intervalSlider.addEventListener("input", handleSliderInput);
     intervalSlider.addEventListener("change", saveConfigToServer);
     intervalInput.addEventListener("change", handleNumericInput);
+    
+    // Press Mode radio binding
+    document.querySelectorAll("input[name='pressMode']").forEach(elem => {
+        elem.addEventListener("change", (e) => {
+            appState.press_mode = e.target.value;
+            updateUI();
+            saveConfigToServer();
+        });
+    });
     
     // Macro toggle binding
     macroToggle.addEventListener("change", handleMacroToggleChange);
@@ -320,6 +330,7 @@ function startPolling() {
                     appState.keycode = newState.keycode;
                     appState.key_name = newState.key_name;
                     appState.interval_ms = newState.interval_ms;
+                    appState.press_mode = newState.press_mode;
                     appState.macro_enabled = newState.macro_enabled;
                     appState.macro_interval_s = newState.macro_interval_s;
                     appState.macro_delay_between_s = newState.macro_delay_between_s;
@@ -371,6 +382,27 @@ function updateUI() {
     keyCodeDisplay.textContent = `KeyCode ${appState.keycode}`;
     statKey.textContent = appState.key_name;
     
+    // Update press mode radios
+    const isRepeat = appState.press_mode !== "hold";
+    const repeatBtn = document.getElementById("pressModeRepeat");
+    const holdBtn = document.getElementById("pressModeHold");
+    if (repeatBtn && holdBtn) {
+        repeatBtn.checked = isRepeat;
+        holdBtn.checked = !isRepeat;
+    }
+    
+    // Disable/enable interval elements if in hold mode
+    const intervalGroup = intervalInput ? intervalInput.closest(".setting-group") : null;
+    if (intervalGroup) {
+        if (!isRepeat) {
+            intervalGroup.style.opacity = "0.4";
+            intervalGroup.style.pointerEvents = "none";
+        } else {
+            intervalGroup.style.opacity = "1";
+            intervalGroup.style.pointerEvents = "auto";
+        }
+    }
+
     // Update interval
     intervalInput.value = appState.interval_ms;
     intervalSlider.value = Math.min(appState.interval_ms, 5000);
@@ -598,6 +630,7 @@ async function saveConfigToServer() {
                 key_code_str: appState.key_code_str,
                 key_name: appState.key_name,
                 interval_ms: appState.interval_ms,
+                press_mode: appState.press_mode,
                 macro_enabled: appState.macro_enabled,
                 macro_interval_s: appState.macro_interval_s,
                 macro_delay_between_s: appState.macro_delay_between_s,
