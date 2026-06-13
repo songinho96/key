@@ -751,7 +751,7 @@ def presser_thread_func():
             # Calculate sleep interval
             if press_mode == "hold":
                 # Quick status checking interval when holding a key
-                actual_interval = 0.05
+                actual_interval = 0.04
             else:
                 # Jittering key press interval (±8% of interval, max ±100ms) to remove uniform rhythm
                 if humanizer_enabled and interval_ms > 50:
@@ -861,9 +861,10 @@ def presser_thread_func():
             
             # Send continuous key (either press once or repeat)
             if press_mode == "hold":
+                # Continuous key down simulation to trigger OS/game auto-repeat hold behavior
+                send_key_down(keycode)
                 if not is_holding:
-                    print(f"[Hold Mode] Pressing down key: {keycode}")
-                    send_key_down(keycode)
+                    print(f"[Hold Mode] Started holding key: {keycode}")
                     is_holding = True
                     held_keycode = keycode
             else:
